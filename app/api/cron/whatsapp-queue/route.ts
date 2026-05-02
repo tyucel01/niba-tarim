@@ -143,7 +143,7 @@ campaign:whatsapp_campaigns (
     `)
     .eq("status", "pending")
     .order("created_at", { ascending: true })
-    .limit(5);
+    .limit(20);
 
   if (error) {
     return NextResponse.json({ ok: false, error: error.message });
