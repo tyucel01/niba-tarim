@@ -135,7 +135,7 @@ function Header() {
           <img
             src="/niba-logo-horizontal.png"
             alt="Niba Tarım Logo"
-            className="h-16 w-auto object-contain"
+            className="h-28 w-auto object-contain"
           />
         </a>
 
@@ -174,26 +174,41 @@ function Hero() {
         backgroundPosition: "95% center",
       }}
     >
+      <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/35 to-transparent" />
+
       <div className="relative mx-auto max-w-7xl px-6 py-20 lg:px-8 lg:py-24">
         <div className="max-w-xl">
-          <h1 className="text-5xl font-black leading-[1.1] tracking-tight text-emerald-900 drop-shadow-[0_2px_6px_rgba(255,255,255,0.65)] md:text-7xl">
+          <h1 className="text-5xl font-black leading-[1.1] tracking-tight text-white drop-shadow-[0_5px_25px_rgba(0,0,0,0.9)] md:text-7xl">
             Gübrede Kalite,
-            <span className="block text-emerald-800">Alışverişte Güven</span>
+            <span className="block text-green-400">Alışverişte Güven!</span>
           </h1>
 
-          <p className="mt-6 max-w-xl text-lg font-medium leading-8 text-slate-800 drop-shadow-[0_1px_5px_rgba(255,255,255,0.8)]">
-  Kaliteli ürünlerimiz ve güçlü iş ortaklarımızla <br />
-  tarımın her aşamasında yanınızdayız.
-</p>
+          <p className="mt-6 max-w-xl text-lg font-medium leading-9 text-white/90 drop-shadow-[0_3px_15px_rgba(0,0,0,0.9)]">
+            Kaliteli ürünlerimiz ve güçlü iş ortaklarımızla <br />
+            tarımın her aşamasında yanınızdayız.
+          </p>
+
           <div className="mt-8">
             <a
-              href="https://wa.me/905334928522"
+              href="https://wa.me/905334928522?text=Merhaba%2C%20fiyat%20almak%20istiyorum"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-md bg-emerald-800 px-6 py-4 text-sm font-black uppercase tracking-wide text-white shadow-xl transition hover:bg-emerald-700"
+              className="inline-flex items-center gap-3 rounded-md bg-green-500 px-7 py-4 text-sm font-black uppercase tracking-wide text-white shadow-[0_10px_30px_rgba(34,197,94,0.5)] transition hover:bg-green-600 hover:scale-105 animate-pulse"
             >
-              Whatsapp'dan Fiyat Alın →
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 32 32"
+                className="h-5 w-5 fill-white"
+              >
+                <path d="M16 3C9.372 3 4 8.372 4 15c0 2.64.86 5.08 2.32 7.06L5 29l7.16-1.88A11.94 11.94 0 0 0 16 27c6.628 0 12-5.372 12-12S22.628 3 16 3zm0 21.8c-1.98 0-3.82-.58-5.36-1.58l-.38-.24-4.24 1.12 1.14-4.14-.26-.4A9.76 9.76 0 1 1 16 24.8zm5.34-7.28c-.3-.16-1.76-.86-2.04-.96-.28-.1-.48-.16-.68.16s-.78.96-.96 1.16c-.18.2-.36.22-.66.06-.3-.16-1.28-.48-2.44-1.54-.9-.8-1.5-1.8-1.68-2.1-.18-.3-.02-.46.14-.62.14-.14.3-.36.46-.54.16-.18.22-.3.34-.5.12-.2.06-.38-.02-.54-.08-.16-.68-1.64-.94-2.26-.24-.58-.48-.5-.66-.5h-.56c-.18 0-.48.06-.74.34-.26.28-1 1-1 2.44s1.02 2.84 1.16 3.04c.14.2 2 3.06 4.86 4.3.68.3 1.2.48 1.62.62.68.22 1.3.18 1.78.1.54-.08 1.76-.72 2-1.42.24-.7.24-1.3.16-1.42-.08-.12-.28-.2-.58-.36z" />
+              </svg>
+
+              Anında En İyi Fiyatı Al →
             </a>
+
+            <p className="mt-3 text-sm font-medium text-white/80">
+              * Dakikalar içinde geri dönüş yapılır.
+            </p>
           </div>
         </div>
       </div>
@@ -307,16 +322,16 @@ function Contact() {
 
       <div className="mx-auto mt-10 max-w-7xl px-6 lg:px-8">
         <div className="overflow-hidden rounded-2xl border border-slate-200 shadow">
-          <iframe
-            src="https://www.google.com/maps?q=Esentepe%20Mah.%20B%C3%BCy%C3%BCkdere%20Cad.%20No%3A199%2F-6%20%C5%9Ei%C5%9Fli%20%C4%B0stanbul&output=embed"
-            width="100%"
-            height="350"
-            style={{ border: 0 }}
-            allowFullScreen
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-            title="Niba Tarım Harita Konumu"
-          />
+<iframe
+  src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d12030.773216473328!2d29.001936264997962!3d41.07569619145496!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x14cab7dcaa17201d%3A0x8455b87c6e65b9d8!2sNiba%20Tar%C4%B1m!5e0!3m2!1str!2str!4v1777467052267!5m2!1str!2str"
+  width="100%"
+  height="350"
+  style={{ border: 0 }}
+  allowFullScreen
+  loading="lazy"
+  referrerPolicy="no-referrer-when-downgrade"
+  title="Niba Tarım Harita Konumu"
+></iframe>
         </div>
       </div>
     </section>

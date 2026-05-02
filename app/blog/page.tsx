@@ -22,8 +22,8 @@ const latestPosts = [
   {
     title: "CAN 26 Gübre Nedir?",
     desc: "CAN 26 gübrenin kullanım alanları ve fiyatı etkileyen faktörler.",
-    href: "#",
-    image: "/blog/gubre.jpg",
+    href: "/blog/can-26-gubre-fiyati",
+    image: "/blog/can26.jpg",
     date: "Yakında",
   },
 ];
