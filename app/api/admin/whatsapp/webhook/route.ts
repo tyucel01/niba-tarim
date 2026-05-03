@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+export const dynamic = "force-dynamic";
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -98,6 +100,7 @@ export async function POST(req: Request) {
                   phone,
                   name: existingContact?.name || name || "WhatsApp Kişisi",
                   status: "waiting",
+                  archived: false,
                   last_message: messageText,
                   last_message_at: new Date().toISOString(),
                   unread_count: 1,
@@ -114,6 +117,7 @@ export async function POST(req: Request) {
                 contact_id: contactId,
                 name: existingContact?.name || name || "WhatsApp Kişisi",
                 status: "waiting",
+                archived: false,
                 last_message: messageText,
                 last_message_at: new Date().toISOString(),
                 unread_count: unreadCount + 1,
@@ -142,7 +146,7 @@ export async function POST(req: Request) {
   } catch (error) {
     return NextResponse.json({
       success: false,
-      error: String(error),
+      error: error instanceof Error ? error.message : String(error),
     });
   }
 }

@@ -32,7 +32,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: false, error: error.message });
   }
 
-  return NextResponse.json({ success: true, members: data });
+  return NextResponse.json({ success: true, members: data || [] });
 }
 
 export async function POST(req: Request) {
@@ -44,6 +44,20 @@ export async function POST(req: Request) {
 
   if (!contactId) {
     return NextResponse.json({ success: false, error: "contactId yok" });
+  }
+
+  const { data: existing } = await supabase
+    .from("whatsapp_group_members")
+    .select("id")
+    .eq("group_id", groupId)
+    .eq("contact_id", contactId)
+    .maybeSingle();
+
+  if (existing) {
+    return NextResponse.json({
+      success: false,
+      error: "Bu kişi zaten bu grupta var.",
+    });
   }
 
   const { data, error } = await supabase

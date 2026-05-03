@@ -38,11 +38,7 @@ export default function Page() {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        name,
-        phone,
-        note,
-      }),
+      body: JSON.stringify({ name, phone, note }),
     });
 
     const data = await res.json();
@@ -54,7 +50,31 @@ export default function Page() {
       setMessage("✅ Kişi eklendi.");
       await loadContacts();
     } else {
-      setMessage("❌ Kişi eklenemedi: " + JSON.stringify(data));
+      setMessage("❌ " + (data.error || JSON.stringify(data)));
+    }
+  }
+
+  async function updateContact(
+    contactId: string,
+    name: string,
+    phone: string,
+    note: string
+  ) {
+    const res = await fetch(`/api/admin/whatsapp/contacts/${contactId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name, phone, note }),
+    });
+
+    const data = await res.json();
+
+    if (data.success) {
+      setMessage("✅ Kişi güncellendi.");
+      await loadContacts();
+    } else {
+      setMessage("❌ " + (data.error || JSON.stringify(data)));
     }
   }
 
@@ -88,7 +108,7 @@ export default function Page() {
             <div>
               <h1 className="text-2xl font-semibold">WhatsApp Kişileri</h1>
               <p className="mt-1 text-sm text-slate-500">
-                Kişi ekle, listele veya tamamen sil.
+                Kişi ekle, düzenle veya tamamen sil.
               </p>
             </div>
 
@@ -151,22 +171,12 @@ export default function Page() {
 
             <tbody>
               {contacts.map((contact) => (
-                <tr key={contact.id} className="border-t">
-                  <td className="p-3 font-medium">
-                    {contact.name || "İsimsiz"}
-                  </td>
-                  <td className="p-3">{contact.phone}</td>
-                  <td className="p-3">{contact.note || "-"}</td>
-                  <td className="p-3">
-                    <button
-                      type="button"
-                      onClick={() => deleteContact(contact.id)}
-                      className="rounded-lg bg-red-100 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-200"
-                    >
-                      Sil
-                    </button>
-                  </td>
-                </tr>
+                <ContactRow
+                  key={contact.id}
+                  contact={contact}
+                  onSave={updateContact}
+                  onDelete={deleteContact}
+                />
               ))}
 
               {contacts.length === 0 && (
@@ -181,5 +191,107 @@ export default function Page() {
         </div>
       </div>
     </main>
+  );
+}
+
+function ContactRow({
+  contact,
+  onSave,
+  onDelete,
+}: {
+  contact: Contact;
+  onSave: (id: string, name: string, phone: string, note: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(contact.name || "");
+  const [phone, setPhone] = useState(contact.phone || "");
+  const [note, setNote] = useState(contact.note || "");
+
+  function cancelEdit() {
+    setName(contact.name || "");
+    setPhone(contact.phone || "");
+    setNote(contact.note || "");
+    setEditing(false);
+  }
+
+  if (!editing) {
+    return (
+      <tr className="border-t">
+        <td className="p-3 font-medium">{contact.name || "İsimsiz"}</td>
+        <td className="p-3">{contact.phone}</td>
+        <td className="p-3">{contact.note || "-"}</td>
+        <td className="p-3">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200"
+            >
+              Düzenle
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onDelete(contact.id)}
+              className="rounded-lg bg-red-100 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-200"
+            >
+              Sil
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr className="border-t bg-emerald-50/40">
+      <td className="p-3">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full rounded-lg border px-3 py-2"
+        />
+      </td>
+
+      <td className="p-3">
+        <input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          className="w-full rounded-lg border px-3 py-2"
+        />
+      </td>
+
+      <td className="p-3">
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          className="w-full rounded-lg border px-3 py-2"
+        />
+      </td>
+
+      <td className="p-3">
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              onSave(contact.id, name, phone, note);
+              setEditing(false);
+            }}
+            className="rounded-lg bg-emerald-100 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-200"
+          >
+            Kaydet
+          </button>
+
+          <button
+            type="button"
+            onClick={cancelEdit}
+            className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200"
+          >
+            İptal
+          </button>
+        </div>
+      </td>
+    </tr>
   );
 }

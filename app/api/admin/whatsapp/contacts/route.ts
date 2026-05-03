@@ -6,6 +6,10 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+function cleanPhone(phone: string) {
+  return String(phone || "").replace(/\s/g, "").trim();
+}
+
 export async function GET() {
   const { data, error } = await supabase
     .from("whatsapp_contacts")
@@ -16,22 +20,36 @@ export async function GET() {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ success: true, contacts: data });
+  return NextResponse.json({ success: true, contacts: data || [] });
 }
 
 export async function POST(req: Request) {
   const { name, phone, note } = await req.json();
+  const cleanedPhone = cleanPhone(phone);
 
-  if (!phone) {
+  if (!cleanedPhone) {
     return NextResponse.json(
       { success: false, error: "Telefon numarası zorunlu." },
       { status: 400 }
     );
   }
 
+  const { data: existing } = await supabase
+    .from("whatsapp_contacts")
+    .select("id, name, phone")
+    .eq("phone", cleanedPhone)
+    .maybeSingle();
+
+  if (existing) {
+    return NextResponse.json(
+      { success: false, error: "Bu telefon numarası zaten kayıtlı." },
+      { status: 400 }
+    );
+  }
+
   const { data, error } = await supabase
     .from("whatsapp_contacts")
-    .insert([{ name, phone, note }])
+    .insert([{ name, phone: cleanedPhone, note }])
     .select()
     .single();
 

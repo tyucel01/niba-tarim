@@ -87,6 +87,8 @@ export default function Page() {
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState("");
+  const [replyText, setReplyText] = useState("");
+  const [replying, setReplying] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -168,6 +170,7 @@ export default function Page() {
     setSelectedConversation(conversation);
     setSelectedContact(null);
     setGroupId("");
+    setReplyText("");
     setMsg("");
     await loadConversationMessages(conversation.id);
   }
@@ -313,6 +316,76 @@ export default function Page() {
     }
   }
 
+  async function sendReply() {
+    if (!selectedConversation || !replyText.trim()) return;
+
+    try {
+      setReplying(true);
+      setMsg("Cevap gönderiliyor...");
+
+      const res = await fetch("/api/admin/whatsapp/conversations/reply", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          conversationId: selectedConversation.id,
+          phone: selectedConversation.phone,
+          text: replyText.trim(),
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!data.success) {
+        setMsg("❌ Cevap gönderilemedi: " + JSON.stringify(data.error || data));
+        return;
+      }
+
+      setReplyText("");
+      setMsg("✅ Cevap gönderildi.");
+
+      await loadConversationMessages(selectedConversation.id);
+      await loadConversations();
+    } catch (err) {
+      setMsg("❌ Cevap hatası: " + String(err));
+    } finally {
+      setReplying(false);
+    }
+  }
+
+  async function archiveConversation(conversationId: string) {
+    if (!confirm("Bu konuşma arşivlensin mi?")) return;
+
+    try {
+      const res = await fetch("/api/admin/whatsapp/conversations/archive", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ conversationId }),
+      });
+
+      const data = await res.json();
+
+      if (!data.success) {
+        setMsg("❌ Konuşma arşivlenemedi: " + JSON.stringify(data.error || data));
+        return;
+      }
+
+      if (selectedConversation?.id === conversationId) {
+        setSelectedConversation(null);
+        setConversationMessages([]);
+        setReplyText("");
+      }
+
+      setMsg("✅ Konuşma arşivlendi.");
+      await loadConversations();
+    } catch (err) {
+      setMsg("❌ Arşivleme hatası: " + String(err));
+    }
+  }
+
   useEffect(() => {
     async function loadAll() {
       await loadGroups();
@@ -355,85 +428,109 @@ export default function Page() {
             </button>
           </div>
 
-          <div className="space-y-2 border-b border-slate-200 p-3">
+          <div className="grid grid-cols-4 gap-2 border-b border-slate-200 p-3">
             <a
               href="/admin/whatsapp/raporlar"
-              className="block rounded-xl bg-white px-4 py-3 text-sm font-semibold shadow-sm"
+              title="Raporlar"
+              className="flex flex-col items-center justify-center rounded-xl bg-white px-2 py-3 text-xs font-semibold shadow-sm hover:bg-emerald-50"
             >
-              Raporlar
+              <span className="text-lg">📊</span>
+              <span className="mt-1">Rapor</span>
             </a>
+
             <a
               href="/admin/whatsapp/gruplar"
-              className="block rounded-xl bg-white px-4 py-3 text-sm font-semibold shadow-sm"
+              title="Gruplar"
+              className="flex flex-col items-center justify-center rounded-xl bg-white px-2 py-3 text-xs font-semibold shadow-sm hover:bg-emerald-50"
             >
-              Gruplar
+              <span className="text-lg">👥</span>
+              <span className="mt-1">Grup</span>
             </a>
+
             <a
               href="/admin/whatsapp/kisiler"
-              className="block rounded-xl bg-white px-4 py-3 text-sm font-semibold shadow-sm"
+              title="Kişiler"
+              className="flex flex-col items-center justify-center rounded-xl bg-white px-2 py-3 text-xs font-semibold shadow-sm hover:bg-emerald-50"
             >
-              Kişiler
+              <span className="text-lg">👤</span>
+              <span className="mt-1">Kişi</span>
             </a>
+
             <a
               href="/admin/whatsapp/ayarlar"
-              className="block rounded-xl bg-white px-4 py-3 text-sm font-semibold shadow-sm"
+              title="Ayarlar"
+              className="flex flex-col items-center justify-center rounded-xl bg-white px-2 py-3 text-xs font-semibold shadow-sm hover:bg-emerald-50"
             >
-              Ayarlar
+              <span className="text-lg">⚙️</span>
+              <span className="mt-1">Ayar</span>
             </a>
           </div>
 
-          <div className="max-h-[calc(100vh-250px)] overflow-y-auto">
+          <div className="max-h-[calc(100vh-205px)] overflow-y-auto">
             <button
               type="button"
               onClick={() => setExpandedWaiting((prev) => !prev)}
               className="flex w-full items-center justify-between px-4 py-3 text-left text-xs font-semibold uppercase text-slate-500 hover:bg-white/60"
             >
-              <span>Cevap Bekleyenler</span>
+              <span>Konuşmalar</span>
               <span className="text-lg">{expandedWaiting ? "−" : "+"}</span>
             </button>
 
             {expandedWaiting && (
               <div className="divide-y divide-slate-200 bg-white/60">
                 {conversations.map((conversation) => (
-                  <button
+                  <div
                     key={conversation.id}
-                    type="button"
-                    onClick={() => openConversation(conversation)}
-                    className={`flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-white ${
+                    className={`flex w-full items-center gap-2 px-4 py-3 hover:bg-white ${
                       selectedConversation?.id === conversation.id
                         ? "bg-white"
                         : ""
                     }`}
                   >
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#00a884] font-semibold text-white">
-                      {(conversation.name || conversation.phone)
-                        ?.slice(0, 1)
-                        .toUpperCase()}
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openConversation(conversation)}
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    >
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] font-semibold text-white">
+                        {(conversation.name || conversation.phone)
+                          ?.slice(0, 1)
+                          .toUpperCase()}
+                      </div>
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="truncate font-medium text-slate-900">
-                          {conversation.name || conversation.phone}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="truncate font-medium text-slate-900">
+                            {conversation.name || conversation.phone}
+                          </div>
+
+                          {conversation.unread_count > 0 && (
+                            <span className="rounded-full bg-[#00a884] px-2 py-0.5 text-xs font-bold text-white">
+                              {conversation.unread_count}
+                            </span>
+                          )}
                         </div>
 
-                        {conversation.unread_count > 0 && (
-                          <span className="rounded-full bg-[#00a884] px-2 py-0.5 text-xs font-bold text-white">
-                            {conversation.unread_count}
-                          </span>
-                        )}
+                        <div className="truncate text-xs text-slate-500">
+                          {conversation.last_message || "-"}
+                        </div>
                       </div>
+                    </button>
 
-                      <div className="truncate text-xs text-slate-500">
-                        {conversation.last_message || "-"}
-                      </div>
-                    </div>
-                  </button>
+                    <button
+                      type="button"
+                      title="Arşivle"
+                      onClick={() => archiveConversation(conversation.id)}
+                      className="rounded-full px-2 py-1 text-xs text-slate-400 hover:bg-slate-100 hover:text-red-600"
+                    >
+                      Arşivle
+                    </button>
+                  </div>
                 ))}
 
                 {conversations.length === 0 && (
                   <div className="px-4 py-3 text-sm text-slate-500">
-                    Cevap bekleyen yok.
+                    Konuşma yok.
                   </div>
                 )}
               </div>
@@ -627,46 +724,87 @@ export default function Page() {
                 </p>
               </div>
             </div>
+
+            {selectedConversation && (
+              <button
+                type="button"
+                onClick={() => archiveConversation(selectedConversation.id)}
+                className="rounded-xl bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm hover:bg-red-50 hover:text-red-600"
+              >
+                Arşivle
+              </button>
+            )}
           </header>
 
           {selectedConversation ? (
-            <div
-              className="flex flex-1 flex-col overflow-y-auto p-6"
-              style={{
-                backgroundColor: "#efeae2",
-                backgroundImage:
-                  "radial-gradient(circle at 25px 25px, rgba(0,0,0,0.035) 2px, transparent 0)",
-                backgroundSize: "46px 46px",
-              }}
-            >
-              <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
-                {conversationMessages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`max-w-md rounded-2xl p-4 text-sm shadow-sm ${
-                      message.direction === "inbound"
-                        ? "self-start bg-white"
-                        : "self-end bg-[#d9fdd3]"
-                    }`}
-                  >
-                    <p className="whitespace-pre-line text-slate-800">
-                      {message.message_text || "-"}
-                    </p>
-                    <p className="mt-2 text-right text-[11px] text-slate-500">
-                      {message.created_at
-                        ? new Date(message.created_at).toLocaleString("tr-TR")
-                        : ""}
-                    </p>
-                  </div>
-                ))}
+            <>
+              <div
+                className="flex-1 overflow-y-auto p-6"
+                style={{
+                  backgroundColor: "#efeae2",
+                  backgroundImage:
+                    "radial-gradient(circle at 25px 25px, rgba(0,0,0,0.035) 2px, transparent 0)",
+                  backgroundSize: "46px 46px",
+                }}
+              >
+                <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+                  {conversationMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`max-w-md rounded-2xl p-4 text-sm shadow-sm ${
+                        message.direction === "inbound"
+                          ? "self-start bg-white"
+                          : "self-end bg-[#d9fdd3]"
+                      }`}
+                    >
+                      <p className="whitespace-pre-line text-slate-800">
+                        {message.message_text || "-"}
+                      </p>
+                      <p className="mt-2 text-right text-[11px] text-slate-500">
+                        {message.created_at
+                          ? new Date(message.created_at).toLocaleString("tr-TR")
+                          : ""}
+                      </p>
+                    </div>
+                  ))}
 
-                {conversationMessages.length === 0 && (
-                  <div className="rounded-3xl bg-white p-8 text-center shadow-sm">
-                    Bu kişiyle henüz kayıtlı konuşma yok.
-                  </div>
-                )}
+                  {conversationMessages.length === 0 && (
+                    <div className="rounded-3xl bg-white p-8 text-center shadow-sm">
+                      Bu kişiyle henüz kayıtlı konuşma yok.
+                    </div>
+                  )}
+
+                  {msg && (
+                    <div className="rounded-2xl bg-white p-4 text-sm text-slate-900 shadow-sm">
+                      {msg}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+
+              <footer className="border-t border-slate-300 bg-[#f0f2f5] p-4">
+                <div className="mx-auto flex max-w-3xl gap-2 rounded-2xl bg-white p-3 shadow-sm">
+                  <input
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") sendReply();
+                    }}
+                    placeholder="Cevap yaz..."
+                    className="flex-1 rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-[#00a884]"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={sendReply}
+                    disabled={replying || !replyText.trim()}
+                    className="rounded-xl bg-[#00a884] px-5 py-3 font-semibold text-white disabled:opacity-50"
+                  >
+                    {replying ? "Gönderiliyor..." : "Gönder"}
+                  </button>
+                </div>
+              </footer>
+            </>
           ) : !groupId && !selectedContact ? (
             <div
               className="flex flex-1 items-center justify-center p-6 text-center"
