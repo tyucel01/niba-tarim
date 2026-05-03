@@ -1,396 +1,223 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import * as XLSX from "xlsx";
+import { Suspense, useRef } from "react";
+import { useSearchParams } from "next/navigation";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 
-type Contact = {
-  id: string;
-  name: string | null;
-  phone: string;
-  note: string | null;
-};
+function PreviewContent() {
+  const params = useSearchParams();
+  const pdfRef = useRef<HTMLDivElement>(null);
 
-type Member = {
-  id: string;
-  contact_id: string;
-  whatsapp_contacts: Contact | null;
-};
+  const bayi = params.get("bayi") || "-";
+  const tarih = params.get("tarih") || "-";
+  const odeme = params.get("odeme") || "-";
+  const depo = params.get("depo") || "-";
+  const nakliye = params.get("nakliye") || "-";
+  const urun = params.get("urun") || "-";
+  const miktar = params.get("miktar") || "0";
+  const fiyat = params.get("fiyat") || "0";
+  const toplam = Number(params.get("toplam") || 0);
 
-type PreviewContact = {
-  name: string;
-  phone: string;
-  note: string;
-};
+  const fiyatNumber = Number(fiyat.replace(",", "."));
 
-function getCell(row: any, possibleKeys: string[]) {
-  const rowKeys = Object.keys(row);
+  const toplamFormatted = toplam.toLocaleString("tr-TR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 
-  for (const key of possibleKeys) {
-    const foundKey = rowKeys.find(
-      (rowKey) =>
-        rowKey.toString().trim().toLocaleLowerCase("tr-TR") ===
-        key.toString().trim().toLocaleLowerCase("tr-TR")
-    );
+  const fiyatFormatted = fiyatNumber.toLocaleString("tr-TR", {
+    maximumFractionDigits: 2,
+  });
 
-    if (foundKey && row[foundKey] !== undefined && row[foundKey] !== null) {
-      return String(row[foundKey]).trim();
-    }
-  }
+  const tarihFormatted =
+    tarih && tarih !== "-"
+      ? new Date(tarih).toLocaleDateString("tr-TR")
+      : "-";
 
-  return "";
-}
+  async function downloadPdf() {
+    if (!pdfRef.current) return;
 
-export default function Page() {
-  const params = useParams();
-  const groupId = String(params?.id || "");
-
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [selectedContactId, setSelectedContactId] = useState("");
-  const [message, setMessage] = useState("");
-  const [importing, setImporting] = useState(false);
-  const [confirmImport, setConfirmImport] = useState(false);
-  const [previewContacts, setPreviewContacts] = useState<PreviewContact[]>([]);
-
-  async function loadContacts() {
-    const res = await fetch("/api/admin/whatsapp/contacts");
-    const data = await res.json();
-    if (data.success) setContacts(data.contacts || []);
-  }
-
-  async function loadMembers() {
-    if (!groupId || groupId === "undefined") return;
-
-    const res = await fetch(
-      `/api/admin/whatsapp/group-members?groupId=${groupId}`
-    );
-    const data = await res.json();
-
-    if (data.success) {
-      setMembers(data.members || []);
-    } else {
-      setMessage("❌ Grup üyeleri yüklenemedi: " + JSON.stringify(data));
-    }
-  }
-
-  async function addMember() {
-    if (!selectedContactId) {
-      setMessage("❌ Önce kişi seç.");
-      return;
-    }
-
-    const res = await fetch("/api/admin/whatsapp/group-members", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupId, contactId: selectedContactId }),
+    const canvas = await html2canvas(pdfRef.current, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      useCORS: true,
     });
 
-    const data = await res.json();
+    const imgData = canvas.toDataURL("image/png");
 
-    if (data.success) {
-      setMessage("✅ Kişi gruba eklendi.");
-      setSelectedContactId("");
-      await loadMembers();
-    } else {
-      setMessage("❌ Eklenemedi: " + JSON.stringify(data));
-    }
-  }
-
-  async function readExcelPreview(file: File) {
-    setMessage("Excel okunuyor...");
-    setPreviewContacts([]);
-    setConfirmImport(false);
-
-    try {
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer);
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<any>(sheet, { defval: "" });
-
-      const parsed = rows
-        .map((row) => {
-          const name = getCell(row, [
-            "name",
-            "Name",
-            "ad",
-            "Ad",
-            "ad soyad",
-            "Ad Soyad",
-            "ad soyadı",
-            "Ad Soyadı",
-            "adı soyadı",
-            "Adı Soyadı",
-            "isim",
-            "İsim",
-            "müşteri",
-            "Müşteri",
-            "müşteri adı",
-            "Müşteri Adı",
-            "firma",
-            "Firma",
-            "firma adı",
-            "Firma Adı",
-            "ünvan",
-            "Ünvan",
-            "unvan",
-            "Unvan",
-          ]);
-
-          const phone = getCell(row, [
-            "phone",
-            "Phone",
-            "telefon",
-            "Telefon",
-            "telefon no",
-            "Telefon No",
-            "telefon numarası",
-            "Telefon Numarası",
-            "gsm",
-            "GSM",
-            "cep",
-            "Cep",
-            "cep telefonu",
-            "Cep Telefonu",
-            "whatsapp",
-            "WhatsApp",
-          ]).replace(/\D/g, "");
-
-          const note = getCell(row, [
-            "note",
-            "Note",
-            "not",
-            "Not",
-            "açıklama",
-            "Açıklama",
-            "aciklama",
-            "Aciklama",
-            "il",
-            "İl",
-            "sehir",
-            "Şehir",
-            "şehir",
-          ]);
-
-          return {
-            name: name || "İsimsiz",
-            phone,
-            note,
-          };
-        })
-        .filter((item) => item.phone);
-
-      setPreviewContacts(parsed);
-      setMessage(
-        `✅ Sadece önizleme yapıldı. Henüz gruba aktarılmadı. ${parsed.length} kişi bulundu.`
-      );
-    } catch (error) {
-      setMessage("❌ Excel okunurken hata oluştu: " + String(error));
-    }
-  }
-
-  async function importPreviewContacts() {
-    if (!confirmImport) {
-      setMessage("❌ Önce 'Aktarımı onaylıyorum' kutusunu işaretle.");
-      return;
-    }
-
-    if (previewContacts.length === 0) {
-      setMessage("❌ Önce Excel seçmelisin.");
-      return;
-    }
-
-    setImporting(true);
-    setMessage("Kişiler gruba aktarılıyor...");
-
-    const res = await fetch("/api/admin/whatsapp/groups/import", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupId, contacts: previewContacts }),
+    const pdf = new jsPDF({
+      orientation: "landscape",
+      unit: "mm",
+      format: "a4",
     });
 
-    const data = await res.json();
+    const pageWidth = 297;
+    const pageHeight = 210;
 
-    if (data.success) {
-      setMessage(
-        `✅ Aktarım tamamlandı. Yeni kişi: ${data.summary.created}, gruba eklenen: ${data.summary.addedToGroup}, atlanan: ${data.summary.skipped}, hatalı: ${data.summary.failed}`
-      );
-      setPreviewContacts([]);
-      setConfirmImport(false);
-      await loadContacts();
-      await loadMembers();
-    } else {
-      setMessage("❌ Aktarım yapılamadı: " + JSON.stringify(data));
-    }
+    const imgWidth = pageWidth;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-    setImporting(false);
+    const y = imgHeight < pageHeight ? (pageHeight - imgHeight) / 2 : 0;
+
+    pdf.addImage(imgData, "PNG", 0, y, imgWidth, Math.min(imgHeight, pageHeight));
+    pdf.save(`siparis-formu-${bayi}.pdf`);
   }
-
-  useEffect(() => {
-    loadContacts();
-    loadMembers();
-  }, [groupId]);
-
-  const memberIds = members.map((m) => m.contact_id);
-  const availableContacts = contacts.filter((c) => !memberIds.includes(c.id));
 
   return (
-    <main className="min-h-screen bg-slate-50 p-6">
-      <div className="mx-auto max-w-5xl space-y-6">
-        <div className="rounded-3xl border bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-semibold">Gruba Kişi Ekle</h1>
+    <main style={{ minHeight: "100vh", background: "#ffffff", padding: 24 }}>
+      <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
+        <button
+          onClick={downloadPdf}
+          style={{
+            borderRadius: 12,
+            background: "#003e2f",
+            color: "#ffffff",
+            padding: "12px 20px",
+            fontWeight: 700,
+          }}
+        >
+          PDF İndir
+        </button>
+      </div>
 
-          <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
-            <h2 className="font-medium text-slate-900">
-              Excel ile Toplu Kişi Ekle
-            </h2>
+      <div
+        ref={pdfRef}
+        style={{
+          width: 1120,
+          minHeight: 780,
+          margin: "0 auto",
+          background: "#ffffff",
+          color: "#000000",
+          padding: 40,
+          fontFamily: "Arial, sans-serif",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <div>
+            <h1 style={{ fontSize: 24, fontWeight: 900 }}>Sipariş Formu</h1>
 
-            <p className="mt-1 text-sm text-slate-500">
-              Excel başlıkları örnek: Ad Soyad, Telefon, Not
-            </p>
+            <div style={{ marginTop: 40, fontSize: 18, lineHeight: 1.8 }}>
+              <p>Niba Tarım Sanayi Ve Ticaret Limited Şirketi</p>
+              <p>
+                Esentepe Mah. Büyükdere Cad. No:199/-6
+                <br />
+                Şişli/İstanbul
+              </p>
+              <p>Zincirlikuyu VD VKN: 6311960146</p>
+            </div>
 
-            <input
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              disabled={importing}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) readExcelPreview(file);
+            <div style={{ marginTop: 60 }}>
+              <p style={{ fontSize: 18, fontWeight: 900 }}>Sayın;</p>
+              <p style={{ marginTop: 32, fontSize: 18 }}>{bayi}</p>
+            </div>
+          </div>
+
+          <div style={{ textAlign: "right" }}>
+            <img
+              src="/niba-logo-horizontal.png"
+              alt="Niba Tarım"
+              style={{
+                height: 180,
+                width: "auto",
+                objectFit: "contain",
               }}
-              className="mt-4 block w-full rounded-xl border bg-white px-4 py-3"
             />
 
-            {previewContacts.length > 0 && (
-              <div className="mt-5">
-                <div className="mb-3 flex items-center justify-between gap-4">
-                  <h3 className="font-medium">
-                    Önizleme ({previewContacts.length} kişi)
-                  </h3>
-
-                  <div className="flex items-center gap-3">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={confirmImport}
-                        onChange={(e) => setConfirmImport(e.target.checked)}
-                      />
-                      Aktarımı onaylıyorum
-                    </label>
-
-                    <button
-                      type="button"
-                      onClick={importPreviewContacts}
-                      disabled={importing || !confirmImport}
-                      className="rounded-xl bg-black px-5 py-2 text-sm font-medium text-white disabled:opacity-50"
-                    >
-                      {importing ? "Aktarılıyor..." : "Gruba Aktar"}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="max-h-80 overflow-auto rounded-2xl border bg-white">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-slate-100">
-                      <tr>
-                        <th className="p-3">Ad / Firma</th>
-                        <th className="p-3">Telefon</th>
-                        <th className="p-3">Not</th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {previewContacts.map((contact, index) => (
-                        <tr key={index} className="border-t">
-                          <td className="p-3">{contact.name || "-"}</td>
-                          <td className="p-3">{contact.phone}</td>
-                          <td className="p-3">{contact.note || "-"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="mt-6 flex gap-3">
-            <select
-              value={selectedContactId}
-              onChange={(e) => setSelectedContactId(e.target.value)}
-              className="flex-1 rounded-xl border px-4 py-3"
+            <div
+              style={{
+                marginTop: 56,
+                display: "grid",
+                gridTemplateColumns: "160px 1fr",
+                gap: "8px 24px",
+                textAlign: "left",
+                fontSize: 18,
+              }}
             >
-              <option value="">Kişi seç</option>
-
-              {availableContacts.map((contact) => (
-                <option key={contact.id} value={contact.id}>
-                  {contact.name || "İsimsiz"} - {contact.phone}
-                </option>
-              ))}
-            </select>
-
-            <button
-              type="button"
-              onClick={addMember}
-              className="rounded-xl bg-black px-5 py-3 font-medium text-white"
-            >
-              Gruba Ekle
-            </button>
-          </div>
-
-          {message && (
-            <div className="mt-4 rounded-xl bg-slate-100 p-4 text-sm">
-              {message}
+              <p style={{ fontWeight: 900 }}>Sipariş Tarihi:</p>
+              <p>{tarihFormatted}</p>
+              <p style={{ fontWeight: 900 }}>Ödeme Şekli:</p>
+              <p>{odeme}</p>
+              <p style={{ fontWeight: 900 }}>Ödeme Vadesi:</p>
+              <p>-</p>
+              <p style={{ fontWeight: 900 }}>Nakliye Durumu:</p>
+              <p>{nakliye}</p>
+              <p style={{ fontWeight: 900 }}>Çıkış Deposu:</p>
+              <p>{depo}</p>
             </div>
-          )}
+          </div>
         </div>
 
-        <div className="rounded-3xl border bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold">Grup Üyeleri</h2>
+        <table
+          style={{
+            marginTop: 72,
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: 17,
+          }}
+        >
+          <thead>
+            <tr style={{ background: "#003e2f", color: "#ffffff" }}>
+              <th style={{ padding: 8, textAlign: "left" }}>Malın Cinsi</th>
+              <th style={{ padding: 8, textAlign: "left" }}>Miktar</th>
+              <th style={{ padding: 8, textAlign: "left" }}>Birim</th>
+              <th style={{ padding: 8, textAlign: "left" }}>Birim Fiyat</th>
+              <th style={{ padding: 8, textAlign: "left" }}>Sevk Adresi</th>
+              <th style={{ padding: 8, textAlign: "left" }}>Peşin Tutar (TL)</th>
+              <th style={{ padding: 8, textAlign: "left" }}>Vadeli Tutar (TL)</th>
+            </tr>
+          </thead>
 
-          <div className="mt-4 overflow-hidden rounded-2xl border">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-100">
-                <tr>
-                  <th className="p-3">Ad / Firma</th>
-                  <th className="p-3">Telefon</th>
-                  <th className="p-3">Not</th>
-                </tr>
-              </thead>
+          <tbody>
+            <tr>
+              <td style={{ padding: 8 }}>{urun}</td>
+              <td style={{ padding: 8 }}>{miktar}</td>
+              <td style={{ padding: 8 }}>Ton</td>
+              <td style={{ padding: 8 }}>{fiyatFormatted}</td>
+              <td style={{ padding: 8 }}>-</td>
+              <td style={{ padding: 8 }}>{toplamFormatted}</td>
+              <td style={{ padding: 8 }}>-</td>
+            </tr>
+          </tbody>
+        </table>
 
-              <tbody>
-                {members.map((member) => (
-                  <tr key={member.id} className="border-t">
-                    <td className="p-3">
-                      {member.whatsapp_contacts?.name || "-"}
-                    </td>
-                    <td className="p-3">
-                      {member.whatsapp_contacts?.phone || "-"}
-                    </td>
-                    <td className="p-3">
-                      {member.whatsapp_contacts?.note || "-"}
-                    </td>
-                  </tr>
-                ))}
-
-                {members.length === 0 && (
-                  <tr>
-                    <td className="p-4 text-slate-500" colSpan={3}>
-                      Bu grupta henüz kişi yok.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <a
-            href="/admin/whatsapp/gruplar"
-            className="mt-4 inline-block text-sm underline"
+        <div style={{ marginTop: 48, marginLeft: "auto", width: 420, fontSize: 18 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              rowGap: 8,
+            }}
           >
-            Gruplara geri dön
-          </a>
+            <p style={{ fontWeight: 900 }}>KDV Hariç Toplam:</p>
+            <p style={{ textAlign: "right" }}>{toplamFormatted}</p>
+            <p style={{ fontWeight: 900 }}>Toplam KDV:</p>
+            <p style={{ textAlign: "right" }}>0,00</p>
+            <p style={{ fontWeight: 900 }}>Genel Toplam</p>
+            <p style={{ textAlign: "right" }}>{toplamFormatted}</p>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 80, fontSize: 13, lineHeight: 1.6 }}>
+          <p>
+            1- Ödeme gününde ödemesi tamamlanmayan siparişlerin iptal hakkı
+            Niba Tarım&apos;ın insiyatifindedir.
+          </p>
+          <p>
+            2- 10 gün içerisinde sevk edilmeyen tüm siparişlerin, piyasa koşulları
+            ve tedarik riskine göre iptal hakkı Niba Tarım&apos;ın
+            insiyatifindedir.
+          </p>
         </div>
       </div>
     </main>
+  );
+}
+
+export default function PreviewPage() {
+  return (
+    <Suspense fallback={<div>Yükleniyor...</div>}>
+      <PreviewContent />
+    </Suspense>
   );
 }

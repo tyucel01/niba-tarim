@@ -201,6 +201,13 @@ const userPhone = data.user?.phone || data.user?.user_metadata?.phone;
           >
             Sipariş Formu Oluştur
           </a>
+
+<a
+  href="/admin/whatsapp/gonder"
+  className="rounded-xl bg-[#25D366] px-6 py-4 font-black text-white shadow-lg hover:bg-[#1ebe5d]"
+>
+  WhatsApp Gönder
+</a>
         </div>
 
         <div className="mt-10 grid gap-6 md:grid-cols-4">

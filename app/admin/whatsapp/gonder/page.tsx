@@ -67,12 +67,15 @@ export default function Page() {
   const [selectedContact, setSelectedContact] = useState<any | null>(null);
   const [selectedTemplateKey, setSelectedTemplateKey] = useState("");
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const [expandedWaiting, setExpandedWaiting] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState(true);
   const [expandedContacts, setExpandedContacts] = useState(false);
   const [openGroupIds, setOpenGroupIds] = useState<Record<string, boolean>>({});
-  const [groupMembers, setGroupMembers] = useState<Record<string, GroupMember[]>>({});
+  const [groupMembers, setGroupMembers] = useState<
+    Record<string, GroupMember[]>
+  >({});
 
   const [selectedConversation, setSelectedConversation] =
     useState<Conversation | null>(null);
@@ -84,7 +87,6 @@ export default function Page() {
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState("");
-const [confirmOpen, setConfirmOpen] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -97,33 +99,36 @@ const [confirmOpen, setConfirmOpen] = useState(false);
     router.push("/admin");
   }
 
-async function loadGroups() {
-  const res = await fetch(`/api/admin/whatsapp/groups?t=${Date.now()}`, {
-    cache: "no-store",
-  });
-  const data = await res.json();
-  setGroups(data.groups || []);
-}
+  async function loadGroups() {
+    const res = await fetch(`/api/admin/whatsapp/groups?t=${Date.now()}`, {
+      cache: "no-store",
+    });
+    const data = await res.json();
+    setGroups(data.groups || []);
+  }
 
-async function loadContacts() {
-  const res = await fetch(`/api/admin/whatsapp/contacts?t=${Date.now()}`, {
-    cache: "no-store",
-  });
-  const data = await res.json();
-  if (data.success) setContacts(data.contacts || []);
-}
+  async function loadContacts() {
+    const res = await fetch(`/api/admin/whatsapp/contacts?t=${Date.now()}`, {
+      cache: "no-store",
+    });
+    const data = await res.json();
+    if (data.success) setContacts(data.contacts || []);
+  }
 
-async function loadConversations() {
-  const res = await fetch(`/api/admin/whatsapp/conversations?t=${Date.now()}`, {
-    cache: "no-store",
-  });
-  const data = await res.json();
-  if (data.success) setConversations(data.conversations || []);
-}
+  async function loadConversations() {
+    const res = await fetch(
+      `/api/admin/whatsapp/conversations?t=${Date.now()}`,
+      {
+        cache: "no-store",
+      },
+    );
+    const data = await res.json();
+    if (data.success) setConversations(data.conversations || []);
+  }
 
   async function loadConversationMessages(conversationId: string) {
     const res = await fetch(
-      `/api/admin/whatsapp/conversations/messages?conversationId=${conversationId}`
+      `/api/admin/whatsapp/conversations/messages?conversationId=${conversationId}`,
     );
     const data = await res.json();
 
@@ -134,7 +139,7 @@ async function loadConversations() {
 
   async function loadGroupMembers(targetGroupId: string) {
     const res = await fetch(
-      `/api/admin/whatsapp/group-members?groupId=${targetGroupId}`
+      `/api/admin/whatsapp/group-members?groupId=${targetGroupId}`,
     );
     const data = await res.json();
 
@@ -180,22 +185,25 @@ async function loadConversations() {
     }
   }
 
-  
   const selectedGroup = groups.find((g) => g.id === groupId);
   const selectedTargetName =
-    selectedGroup?.name || selectedContact?.name || selectedContact?.phone || "";
+    selectedGroup?.name ||
+    selectedContact?.name ||
+    selectedContact?.phone ||
+    "";
 
   const selectedTemplate = useMemo(() => {
     return templates.find(
-      (t) => `${t.name}__${t.language}` === selectedTemplateKey
+      (t) => `${t.name}__${t.language}` === selectedTemplateKey,
     );
   }, [templates, selectedTemplateKey]);
 
   const bodyText =
-    selectedTemplate?.components?.find((c) => c.type === "BODY")?.text || "";
+    selectedTemplate?.components?.find((c) => c.type?.toUpperCase() === "BODY")
+      ?.text || "";
 
   const headerComponent = selectedTemplate?.components?.find(
-    (c) => c.type?.toUpperCase() === "HEADER"
+    (c) => c.type?.toUpperCase() === "HEADER",
   );
 
   const hasImageHeader = headerComponent?.format?.toUpperCase() === "IMAGE";
@@ -204,7 +212,7 @@ async function loadConversations() {
 
   useEffect(() => {
     const values = Array.from({ length: variableCount }).map(
-      (_, index) => bodyVariables[index] || ""
+      (_, index) => bodyVariables[index] || "",
     );
     setBodyVariables(values);
   }, [selectedTemplateKey, variableCount]);
@@ -213,33 +221,41 @@ async function loadConversations() {
     if (!hasImageHeader) setHeaderImageUrl("");
   }, [hasImageHeader]);
 
-async function uploadImage(file: File) {
-  try {
-    setUploading(true);
-    setMsg("Görsel yükleniyor...");
+  async function uploadImage(file: File) {
+    try {
+      setUploading(true);
+      setMsg("Görsel yükleniyor...");
 
-    const formData = new FormData();
-    formData.append("file", file);
+      const formData = new FormData();
+      formData.append("file", file);
 
-    const res = await fetch("/api/admin/whatsapp/media/upload", {
-      method: "POST",
-      body: formData,
-    });
+      const res = await fetch("/api/admin/whatsapp/media/upload", {
+        method: "POST",
+        body: formData,
+      });
 
-    const data = await res.json();
+      const text = await res.text();
+      let data;
 
-    if (data.success) {
-      setHeaderImageUrl(data.url);
-      setMsg("✅ Görsel yüklendi.");
-    } else {
-      setMsg("❌ Görsel yüklenemedi: " + JSON.stringify(data));
+      try {
+        data = JSON.parse(text);
+      } catch {
+        setMsg("❌ Upload API JSON dönmedi: " + text.slice(0, 300));
+        return;
+      }
+
+      if (data.success) {
+        setHeaderImageUrl(data.url);
+        setMsg("✅ Görsel yüklendi.");
+      } else {
+        setMsg("❌ Görsel yüklenemedi: " + JSON.stringify(data));
+      }
+    } catch (err) {
+      setMsg("❌ Upload error: " + String(err));
+    } finally {
+      setUploading(false);
     }
-  } catch (err) {
-    setMsg("❌ Upload error: " + String(err));
-  } finally {
-    setUploading(false); // 👈 HER DURUMDA ÇALIŞIR
   }
-}
 
   async function send() {
     if (!groupId && !selectedContact) {
@@ -262,65 +278,63 @@ async function uploadImage(file: File) {
       return;
     }
 
-    setSending(true);
-    setMsg("Gönderim kuyruğa alınıyor...");
+    try {
+      setSending(true);
+      setMsg("Gönderim kuyruğa alınıyor...");
 
-    const res = await fetch("/api/admin/whatsapp/send-campaign", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        groupId: groupId || null,
-        contactId: selectedContact?.id || null,
-        templateName: selectedTemplate.name,
-        languageCode: selectedTemplate.language,
-        headerImageUrl: headerImageUrl || null,
-        bodyVariables,
-      }),
-    });
+      const res = await fetch("/api/admin/whatsapp/send-campaign", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          groupId: groupId || null,
+          contactId: selectedContact?.id || null,
+          templateName: selectedTemplate.name,
+          languageCode: selectedTemplate.language,
+          headerImageUrl: headerImageUrl || null,
+          bodyVariables,
+        }),
+      });
 
-const text = await res.text();
+      const data = await res.json();
 
-let data;
-try {
-  data = JSON.parse(text);
-} catch {
-  setMsg("❌ Upload API JSON dönmedi: " + text.slice(0, 300));
-  setUploading(false);
-  return;
-}
-    if (data.success) {
-      setMsg(`✅ Gönderim kuyruğa alındı. ${data.queued} kişi sıraya eklendi.`);
-    } else {
-      setMsg("❌ " + JSON.stringify(data));
+      if (data.success) {
+        setMsg(
+          `✅ Gönderim kuyruğa alındı. ${data.queued} kişi sıraya eklendi.`,
+        );
+      } else {
+        setMsg("❌ " + JSON.stringify(data));
+      }
+    } catch (err) {
+      setMsg("❌ Gönderim hatası: " + String(err));
+    } finally {
+      setSending(false);
     }
-
-    setSending(false);
   }
 
-useEffect(() => {
-  async function loadAll() {
-    await loadGroups();
-    await loadContacts();
-    await loadTemplates();
-    await loadConversations();
-  }
-
-  loadAll();
-
-  const interval = setInterval(() => {
-    if (document.visibilityState === "visible") {
-      loadGroups();
-      loadContacts();
-      loadConversations();
+  useEffect(() => {
+    async function loadAll() {
+      await loadGroups();
+      await loadContacts();
+      await loadTemplates();
+      await loadConversations();
     }
-  }, 2000);
 
-  return () => {
-    clearInterval(interval);
-  };
-}, []);
+    loadAll();
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        loadGroups();
+        loadContacts();
+        loadConversations();
+      }
+    }, 2000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, []);
 
   return (
     <main className="min-h-screen bg-[#d9dbd5] text-slate-900">
@@ -342,7 +356,6 @@ useEffect(() => {
           </div>
 
           <div className="space-y-2 border-b border-slate-200 p-3">
-
             <a
               href="/admin/whatsapp/raporlar"
               className="block rounded-xl bg-white px-4 py-3 text-sm font-semibold shadow-sm"
@@ -361,13 +374,12 @@ useEffect(() => {
             >
               Kişiler
             </a>
-
-<a
-  href="/admin/whatsapp/ayarlar"
-  className="block rounded-xl bg-white px-4 py-3 text-sm font-semibold shadow-sm"
->
-  Ayarlar
-</a>
+            <a
+              href="/admin/whatsapp/ayarlar"
+              className="block rounded-xl bg-white px-4 py-3 text-sm font-semibold shadow-sm"
+            >
+              Ayarlar
+            </a>
           </div>
 
           <div className="max-h-[calc(100vh-250px)] overflow-y-auto">
@@ -388,7 +400,9 @@ useEffect(() => {
                     type="button"
                     onClick={() => openConversation(conversation)}
                     className={`flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-white ${
-                      selectedConversation?.id === conversation.id ? "bg-white" : ""
+                      selectedConversation?.id === conversation.id
+                        ? "bg-white"
+                        : ""
                     }`}
                   >
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#00a884] font-semibold text-white">
@@ -479,8 +493,6 @@ useEffect(() => {
                             </div>
                           </div>
                         </button>
-
-                       
                       </div>
 
                       {isOpen && (
@@ -514,14 +526,13 @@ useEffect(() => {
                                   }`}
                                 >
                                   <div className="truncate font-medium text-slate-800">
-                                    {member.whatsapp_contacts?.name || "İsimsiz"}
+                                    {member.whatsapp_contacts?.name ||
+                                      "İsimsiz"}
                                   </div>
                                   <div className="truncate text-xs text-slate-500">
                                     {member.whatsapp_contacts?.phone || "-"}
                                   </div>
                                 </button>
-
-
                               </div>
                             ))
                           )}
@@ -575,8 +586,6 @@ useEffect(() => {
                         {contact.phone}
                       </div>
                     </button>
-
-
                   </div>
                 ))}
 
@@ -611,10 +620,10 @@ useEffect(() => {
                   {selectedConversation
                     ? "Konuşma geçmişi"
                     : selectedTargetName
-                    ? selectedContact
-                      ? "Kişiye template gönder"
-                      : "Gruba template gönder"
-                    : "Mesaj göndermek için soldan grup veya kişi seç"}
+                      ? selectedContact
+                        ? "Kişiye template gönder"
+                        : "Gruba template gönder"
+                      : "Mesaj göndermek için soldan grup veya kişi seç"}
                 </p>
               </div>
             </div>
@@ -691,22 +700,23 @@ useEffect(() => {
               >
                 <div className="mx-auto max-w-3xl space-y-4">
                   <div className="rounded-2xl bg-white p-5 shadow-sm">
-<button
-  type="button"
-  onClick={() => setTemplateModalOpen(true)}
-  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm hover:border-[#00a884]"
->
-  <div className="text-xs font-medium text-slate-500">Meta Template</div>
-  <div className="mt-1 font-semibold text-slate-900">
-    {selectedTemplate
-      ? `${selectedTemplate.name} — ${selectedTemplate.language}`
-      : "Template seç"}
-  </div>
-  <div className="mt-1 text-xs text-slate-500">
-    Tıklayınca template önizleme ekranı açılır.
-  </div>
-</button>
-
+                    <button
+                      type="button"
+                      onClick={() => setTemplateModalOpen(true)}
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm hover:border-[#00a884]"
+                    >
+                      <div className="text-xs font-medium text-slate-500">
+                        Meta Template
+                      </div>
+                      <div className="mt-1 font-semibold text-slate-900">
+                        {selectedTemplate
+                          ? `${selectedTemplate.name} — ${selectedTemplate.language}`
+                          : "Template seç"}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        Tıklayınca template önizleme ekranı açılır.
+                      </div>
+                    </button>
 
                     {hasImageHeader && (
                       <>
@@ -723,25 +733,22 @@ useEffect(() => {
                           }}
                           className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
                         />
-{uploading && (
-  <p className="mt-2 text-sm text-slate-500">
-    Görsel yükleniyor...
-  </p>
-)}
+
+                        {uploading && (
+                          <p className="mt-2 text-sm text-slate-500">
+                            Görsel yükleniyor...
+                          </p>
+                        )}
 
                         {headerImageUrl && (
-                          <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
-                            <img
-                              src={headerImageUrl}
-                              alt="WhatsApp header"
-                              className="max-h-64 w-full object-cover"
-                            />
+                          <div className="mt-3 flex items-center justify-between rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                            <span>✅ Görsel yüklendi</span>
                             <button
                               type="button"
                               onClick={() => setHeaderImageUrl("")}
-                              className="w-full bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                              className="font-semibold text-emerald-900 underline"
                             >
-                              Görseli kaldır
+                              Kaldır
                             </button>
                           </div>
                         )}
@@ -767,7 +774,7 @@ useEffect(() => {
                               placeholder={`{{${index + 1}}} değeri`}
                               className="w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-900 outline-none focus:border-[#00a884]"
                             />
-                          )
+                          ),
                         )}
                       </div>
                     )}
@@ -775,14 +782,6 @@ useEffect(() => {
 
                   <div className="flex justify-end">
                     <div className="relative max-w-md rounded-2xl rounded-tr-sm bg-[#d9fdd3] p-4 shadow-sm">
-                      {hasImageHeader && headerImageUrl && (
-                        <img
-                          src={headerImageUrl}
-                          alt="Önizleme"
-                          className="mb-3 max-h-56 w-full rounded-xl object-cover"
-                        />
-                      )}
-
                       <p className="whitespace-pre-line text-sm leading-6 text-slate-800">
                         {previewText || selectedTemplate?.name || "Şablon seç"}
                       </p>
@@ -804,148 +803,178 @@ useEffect(() => {
               <footer className="border-t border-slate-300 bg-[#f0f2f5] p-4">
                 <button
                   type="button"
-onClick={() => setConfirmOpen(true)}
+                  onClick={() => setConfirmOpen(true)}
                   disabled={
-  sending ||
-  uploading ||
-  (!groupId && !selectedContact) ||
-  !selectedTemplate ||
-  (hasImageHeader && !headerImageUrl)
-}
+                    sending ||
+                    uploading ||
+                    (!groupId && !selectedContact) ||
+                    !selectedTemplate ||
+                    (hasImageHeader && !headerImageUrl)
+                  }
                   className="w-full rounded-full bg-[#00a884] px-5 py-3 font-semibold text-white shadow-sm disabled:opacity-50"
                 >
                   {sending ? "Kuyruğa alınıyor..." : "Gönder"}
                 </button>
-{templateModalOpen && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-    <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl">
-      <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900">Template Seç</h2>
-          <p className="text-sm text-slate-500">
-            Önizlemeyi kontrol edip göndermek istediğin template’i seç.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setTemplateModalOpen(false)}
-          className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700"
-        >
-          Kapat
-        </button>
-      </div>
-
-      <div className="grid max-h-[75vh] grid-cols-1 gap-4 overflow-y-auto p-5 md:grid-cols-2">
-        {templates.map((t) => {
-          const body =
-            t.components?.find((c) => c.type?.toUpperCase() === "BODY")
-              ?.text || "";
-
-          const header = t.components?.find(
-            (c) => c.type?.toUpperCase() === "HEADER"
-          );
-
-          const isImageHeader = header?.format?.toUpperCase() === "IMAGE";
-          const key = `${t.name}__${t.language}`;
-          const isSelected = selectedTemplateKey === key;
-
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => {
-                setSelectedTemplateKey(key);
-                setTemplateModalOpen(false);
-              }}
-              className={`rounded-3xl border p-4 text-left transition ${
-                isSelected
-                  ? "border-[#00a884] bg-emerald-50"
-                  : "border-slate-200 bg-white hover:border-[#00a884]"
-              }`}
-            >
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <div>
-                  <div className="font-bold text-slate-900">{t.name}</div>
-                  <div className="text-xs text-slate-500">
-                    {t.language} — {t.category}
-                  </div>
-                </div>
-
-                {isImageHeader && (
-                  <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
-                    Görsel ister
-                  </span>
-                )}
-              </div>
-
-              <div className="rounded-2xl bg-[#efeae2] p-3">
-                <div className="ml-auto max-w-sm rounded-2xl rounded-tr-sm bg-[#d9fdd3] p-4 shadow-sm">
-                  {isImageHeader && (
-                    <div className="mb-3 flex h-32 items-center justify-center rounded-xl bg-slate-200 text-sm text-slate-500">
-                      Header görsel alanı
-                    </div>
-                  )}
-
-                  <p className="whitespace-pre-line text-sm leading-6 text-slate-800">
-                    {body || "Body içeriği yok"}
-                  </p>
-
-                  <p className="mt-2 text-right text-[11px] text-slate-500">
-                    {t.language}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-3 text-right text-sm font-semibold text-[#00a884]">
-                {isSelected ? "Seçili" : "Bu template’i seç"}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  </div>
-)}
               </footer>
-{confirmOpen && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-    <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-      <h2 className="text-lg font-bold">Gönderimi Onayla</h2>
-
-      <div className="mt-4 text-sm text-slate-600 space-y-1">
-        <p><b>Hedef:</b> {selectedTargetName || "-"}</p>
-        <p><b>Template:</b> {selectedTemplate?.name || "-"}</p>
-        <p><b>Değişken:</b> {bodyVariables.join(", ") || "-"}</p>
-        <p><b>Görsel:</b> {headerImageUrl ? "Var" : "Yok"}</p>
-      </div>
-
-      <div className="mt-6 flex gap-3">
-        <button
-          onClick={() => setConfirmOpen(false)}
-          className="flex-1 rounded-xl bg-slate-200 py-2"
-        >
-          Vazgeç
-        </button>
-
-<button
-  disabled={sending}
-  onClick={async () => {
-    setConfirmOpen(false);
-    await send();
-  }}
-          className="flex-1 rounded-xl bg-[#00a884] py-2 text-white font-semibold"
-        >
-{sending ? "Kuyruğa alınıyor..." : "Gönder"}
-        </button>
-      </div>
-    </div>
-  </div>
-)}
             </>
           )}
         </section>
       </div>
+
+      {templateModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">
+                  Template Seç
+                </h2>
+                <p className="text-sm text-slate-500">
+                  Önizlemeyi kontrol edip göndermek istediğin template’i seç.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setTemplateModalOpen(false)}
+                className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700"
+              >
+                Kapat
+              </button>
+            </div>
+
+            <div className="grid max-h-[75vh] grid-cols-1 gap-4 overflow-y-auto p-5 md:grid-cols-2">
+              {templates.map((t) => {
+                const body =
+                  t.components?.find((c) => c.type?.toUpperCase() === "BODY")
+                    ?.text || "";
+
+                const header = t.components?.find(
+                  (c) => c.type?.toUpperCase() === "HEADER",
+                );
+
+                const isImageHeader = header?.format?.toUpperCase() === "IMAGE";
+                const key = `${t.name}__${t.language}`;
+                const isSelected = selectedTemplateKey === key;
+
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => {
+                      setSelectedTemplateKey(key);
+                      setTemplateModalOpen(false);
+                    }}
+                    className={`rounded-3xl border p-4 text-left transition ${
+                      isSelected
+                        ? "border-[#00a884] bg-emerald-50"
+                        : "border-slate-200 bg-white hover:border-[#00a884]"
+                    }`}
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <div>
+                        <div className="font-bold text-slate-900">{t.name}</div>
+                        <div className="text-xs text-slate-500">
+                          {t.language} — {t.category}
+                        </div>
+                      </div>
+
+                      {isImageHeader && (
+                        <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                          Görsel ister
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="rounded-2xl bg-[#efeae2] p-3">
+                      <div className="ml-auto max-w-sm rounded-2xl rounded-tr-sm bg-[#d9fdd3] p-4 shadow-sm">
+                        {isImageHeader && (
+                          <div className="mb-3 flex h-32 items-center justify-center rounded-xl bg-slate-200 text-sm text-slate-500">
+                            Header görsel alanı
+                          </div>
+                        )}
+
+                        <p className="whitespace-pre-line text-sm leading-6 text-slate-800">
+                          {body || "Body içeriği yok"}
+                        </p>
+
+                        <p className="mt-2 text-right text-[11px] text-slate-500">
+                          {t.language}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 text-right text-sm font-semibold text-[#00a884]">
+                      {isSelected ? "Seçili" : "Bu template’i seç"}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-bold">Gönderimi Onayla</h2>
+
+            <div className="mt-4 space-y-2 text-sm text-slate-600">
+              <p>
+                <b>Hedef:</b> {selectedTargetName || "-"}
+              </p>
+              <p>
+                <b>Template:</b> {selectedTemplate?.name || "-"}
+              </p>
+              <p>
+                <b>Değişken:</b> {bodyVariables.join(", ") || "-"}
+              </p>
+              <p>
+                <b>Görsel:</b> {headerImageUrl ? "Var" : "Yok"}
+              </p>
+
+              {headerImageUrl && (
+                <div className="mt-4 overflow-hidden rounded-2xl border bg-slate-50">
+                  <img
+                    src={headerImageUrl}
+                    alt="Gönderilecek görsel"
+                    className="max-h-72 w-full object-contain"
+                  />
+                </div>
+              )}
+
+              <div className="mt-4 rounded-2xl bg-[#d9fdd3] p-4 text-slate-800">
+                <p className="whitespace-pre-line text-sm leading-6">
+                  {previewText || selectedTemplate?.name || "Şablon seç"}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmOpen(false)}
+                className="flex-1 rounded-xl bg-slate-200 py-2"
+              >
+                Vazgeç
+              </button>
+
+              <button
+                type="button"
+                disabled={sending}
+                onClick={async () => {
+                  setConfirmOpen(false);
+                  await send();
+                }}
+                className="flex-1 rounded-xl bg-[#00a884] py-2 font-semibold text-white disabled:opacity-50"
+              >
+                {sending ? "Kuyruğa alınıyor..." : "Gönder"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
