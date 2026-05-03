@@ -66,7 +66,7 @@ export default function Page() {
   const [groupId, setGroupId] = useState("");
   const [selectedContact, setSelectedContact] = useState<any | null>(null);
   const [selectedTemplateKey, setSelectedTemplateKey] = useState("");
-const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
 
   const [expandedWaiting, setExpandedWaiting] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState(true);
@@ -84,6 +84,7 @@ const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState("");
+const [confirmOpen, setConfirmOpen] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -193,11 +194,11 @@ async function loadConversations() {
   const bodyText =
     selectedTemplate?.components?.find((c) => c.type === "BODY")?.text || "";
 
-const headerComponent = selectedTemplate?.components?.find(
-  (c) => c.type?.toUpperCase() === "HEADER"
-);
+  const headerComponent = selectedTemplate?.components?.find(
+    (c) => c.type?.toUpperCase() === "HEADER"
+  );
 
-const hasImageHeader = headerComponent?.format?.toUpperCase() === "IMAGE";
+  const hasImageHeader = headerComponent?.format?.toUpperCase() === "IMAGE";
   const variableCount = countVariables(bodyText);
   const previewText = replaceVariables(bodyText, bodyVariables);
 
@@ -212,7 +213,8 @@ const hasImageHeader = headerComponent?.format?.toUpperCase() === "IMAGE";
     if (!hasImageHeader) setHeaderImageUrl("");
   }, [hasImageHeader]);
 
-  async function uploadImage(file: File) {
+async function uploadImage(file: File) {
+  try {
     setUploading(true);
     setMsg("Görsel yükleniyor...");
 
@@ -232,9 +234,12 @@ const hasImageHeader = headerComponent?.format?.toUpperCase() === "IMAGE";
     } else {
       setMsg("❌ Görsel yüklenemedi: " + JSON.stringify(data));
     }
-
-    setUploading(false);
+  } catch (err) {
+    setMsg("❌ Upload error: " + String(err));
+  } finally {
+    setUploading(false); // 👈 HER DURUMDA ÇALIŞIR
   }
+}
 
   async function send() {
     if (!groupId && !selectedContact) {
@@ -275,8 +280,16 @@ const hasImageHeader = headerComponent?.format?.toUpperCase() === "IMAGE";
       }),
     });
 
-    const data = await res.json();
+const text = await res.text();
 
+let data;
+try {
+  data = JSON.parse(text);
+} catch {
+  setMsg("❌ Upload API JSON dönmedi: " + text.slice(0, 300));
+  setUploading(false);
+  return;
+}
     if (data.success) {
       setMsg(`✅ Gönderim kuyruğa alındı. ${data.queued} kişi sıraya eklendi.`);
     } else {
@@ -710,6 +723,11 @@ useEffect(() => {
                           }}
                           className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
                         />
+{uploading && (
+  <p className="mt-2 text-sm text-slate-500">
+    Görsel yükleniyor...
+  </p>
+)}
 
                         {headerImageUrl && (
                           <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
@@ -786,8 +804,8 @@ useEffect(() => {
               <footer className="border-t border-slate-300 bg-[#f0f2f5] p-4">
                 <button
                   type="button"
-                  onClick={send}
-disabled={
+onClick={() => setConfirmOpen(true)}
+                  disabled={
   sending ||
   uploading ||
   (!groupId && !selectedContact) ||
@@ -890,6 +908,40 @@ disabled={
   </div>
 )}
               </footer>
+{confirmOpen && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+      <h2 className="text-lg font-bold">Gönderimi Onayla</h2>
+
+      <div className="mt-4 text-sm text-slate-600 space-y-1">
+        <p><b>Hedef:</b> {selectedTargetName || "-"}</p>
+        <p><b>Template:</b> {selectedTemplate?.name || "-"}</p>
+        <p><b>Değişken:</b> {bodyVariables.join(", ") || "-"}</p>
+        <p><b>Görsel:</b> {headerImageUrl ? "Var" : "Yok"}</p>
+      </div>
+
+      <div className="mt-6 flex gap-3">
+        <button
+          onClick={() => setConfirmOpen(false)}
+          className="flex-1 rounded-xl bg-slate-200 py-2"
+        >
+          Vazgeç
+        </button>
+
+<button
+  disabled={sending}
+  onClick={async () => {
+    setConfirmOpen(false);
+    await send();
+  }}
+          className="flex-1 rounded-xl bg-[#00a884] py-2 text-white font-semibold"
+        >
+{sending ? "Kuyruğa alınıyor..." : "Gönder"}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
             </>
           )}
         </section>
