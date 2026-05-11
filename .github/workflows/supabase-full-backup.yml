@@ -34,7 +34,9 @@ jobs:
         run: |
           FILE_NAME="supabase-db-$(date +'%Y-%m-%d-%H-%M').dump"
 
-          /usr/lib/postgresql/17/bin/pg_dump "${{ secrets.SUPABASE_DATABASE_URL }}" \            --format=custom \
+          /usr/lib/postgresql/17/bin/pg_dump \
+            "${{ secrets.SUPABASE_DATABASE_URL }}" \
+            --format=custom \
             --no-owner \
             --no-privileges \
             --file="backups/db/$FILE_NAME"
