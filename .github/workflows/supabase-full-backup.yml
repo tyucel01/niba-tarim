@@ -1,0 +1,59 @@
+name: Supabase Full Backup
+
+on:
+  schedule:
+    - cron: "0 9 * * *"
+    - cron: "0 21 * * *"
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repo checkout
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL Client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client zip
+
+      - name: Create backup folders
+        run: |
+          mkdir -p backups/db
+          mkdir -p backups/storage
+
+      - name: Full PostgreSQL Backup
+        run: |
+          FILE_NAME="supabase-db-$(date +'%Y-%m-%d-%H-%M').dump"
+
+          pg_dump "${{ secrets.SUPABASE_DATABASE_URL }}" \
+            --format=custom \
+            --no-owner \
+            --no-privileges \
+            --file="backups/db/$FILE_NAME"
+
+      - name: Download Supabase Storage
+        run: |
+          curl -L \
+            -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            "${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}/storage/v1/object/list" \
+            -o backups/storage/storage-index.json
+
+      - name: Zip everything
+        run: |
+          FINAL_NAME="niba-full-backup-$(date +'%Y-%m-%d-%H-%M').zip"
+
+          zip -r "$FINAL_NAME" backups
+
+          mkdir final
+          mv "$FINAL_NAME" final/
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: niba-full-backup
+          path: final/*.zip
+          retention-days: 14
