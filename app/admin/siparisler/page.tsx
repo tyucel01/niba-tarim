@@ -1,234 +1,407 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+
+type Filter = "all" | "ready" | "blocked";
 
 export default function SiparislerPage() {
-  const [form, setForm] = useState({
-    satisId: "",
-    satisTarihi: "",
-    bayi: "",
-    tedarikciler: "",
-    siparisAlan: "",
-    urun: "",
-    marka: "",
-    alisFiyati: "",
-    faturaNo: "",
-    tedarikciFaturaTutar: "",
-    pesinSatisFiyati: "",
-    siparisTonaj: "",
-    teslimOlanTonaj: "",
-    yapilanOdeme: "",
-    satisTuru: "Peşin",
-    vadeTarihi: "",
-    vadeFarki: "",
-    vadeSuresi: "",
-    not: "",
-    nakliye: "",
-    plaka: "",
-    sevkYeri: "",
-    sevkDurumu: "Bekliyor",
-    gelenFatura: "",
-    sevkNo: "",
-    gts: "",
-    fatura: "",
-  });
+  const [loading, setLoading] = useState(true);
+  const [siparisler, setSiparisler] = useState<any[]>([]);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [message, setMessage] = useState("");
 
-  function update(name: string, value: string) {
-    setForm((prev) => ({ ...prev, [name]: value }));
+  async function loadSiparisler() {
+    try {
+      setLoading(true);
+      setMessage("");
+
+      const res = await fetch(`/api/admin/google-sheets/siparisler?t=${Date.now()}`, {
+        cache: "no-store",
+      });
+
+      const data = await res.json();
+
+      if (!data.success) {
+        setMessage("❌ Siparişler alınamadı: " + JSON.stringify(data.error));
+        setSiparisler([]);
+        return;
+      }
+
+      setSiparisler(data.rows || []);
+    } catch (err) {
+      setMessage("❌ Hata: " + String(err));
+    } finally {
+      setLoading(false);
+    }
   }
 
-  const calc = useMemo(() => {
-    const alis = Number(form.alisFiyati) || 0;
-    const satis = Number(form.pesinSatisFiyati) || 0;
-    const tonaj = Number(form.siparisTonaj) || 0;
-    const teslim = Number(form.teslimOlanTonaj) || 0;
-    const nakliye = Number(form.nakliye) || 0;
-    const vadeFarki = Number(form.vadeFarki) || 0;
+  useEffect(() => {
+    loadSiparisler();
+  }, []);
 
-    const tedarikciyeOdenecekTutar = alis * tonaj;
-    const bayiSatisToplam = satis * tonaj;
-    const tonBasiKar = satis - alis;
-    const eksikTonaj = Math.max(tonaj - teslim, 0);
-    const perakendeKari = bayiSatisToplam - tedarikciyeOdenecekTutar - nakliye;
-    const karYuzde = bayiSatisToplam > 0 ? (perakendeKari / bayiSatisToplam) * 100 : 0;
-    const vadeliFiyat = satis + vadeFarki;
+  const filtered = useMemo(() => {
+    return siparisler.filter((s) => {
+      const text = JSON.stringify(s).toLowerCase();
+      const matchSearch = text.includes(search.toLowerCase());
+      const status = getInvoiceStatus(s);
 
-    return {
-      tedarikciyeOdenecekTutar,
-      bayiSatisToplam,
-      tonBasiKar,
-      eksikTonaj,
-      perakendeKari,
-      karYuzde,
-      vadeliFiyat,
-    };
-  }, [form]);
+      if (filter === "ready") return matchSearch && status.canInvoice;
+      if (filter === "blocked") return matchSearch && !status.canInvoice;
+
+      return matchSearch;
+    });
+  }, [siparisler, search, filter]);
+
+  const readyCount = siparisler.filter((s) => getInvoiceStatus(s).canInvoice).length;
+  const blockedCount = siparisler.length - readyCount;
 
   return (
-    <main className="min-h-screen bg-slate-100 p-8">
-      <div className="mx-auto max-w-7xl">
-        <a href="/admin" className="font-bold text-emerald-800">
+    <main className="min-h-screen bg-[#eef1ea] p-4 text-slate-900 md:p-6">
+      <div className="mx-auto max-w-7xl space-y-5">
+        <Link href="/admin" prefetch={false} className="font-black text-emerald-800">
           ← Admin Panel
-        </a>
+        </Link>
 
-        <div className="mt-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-black text-slate-950">Sipariş Kaydı</h1>
-            <p className="mt-2 text-slate-600">
-              Satış, tedarik, sevk ve fatura bilgilerini buradan takip edin.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            className="rounded-xl bg-emerald-900 px-6 py-4 font-black text-white shadow-lg hover:bg-emerald-800"
-          >
-            Siparişi Kaydet
-          </button>
-        </div>
-
-        <section className="mt-8 grid gap-6 lg:grid-cols-[1fr_360px]">
-          <div className="space-y-6">
-            <Panel title="Satış Bilgileri">
-              <Grid>
-                <Input label="Satış ID" name="satisId" value={form.satisId} update={update} />
-                <Input label="Satış Tarihi" name="satisTarihi" type="date" value={form.satisTarihi} update={update} />
-                <Input label="Bayi" name="bayi" value={form.bayi} update={update} />
-                <Input label="Tedarikçiler" name="tedarikciler" value={form.tedarikciler} update={update} />
-                <Input label="Sipariş Alan" name="siparisAlan" value={form.siparisAlan} update={update} />
-                <Input label="Satış Türü" name="satisTuru" value={form.satisTuru} update={update} />
-              </Grid>
-            </Panel>
-
-            <Panel title="Ürün ve Fiyat Bilgileri">
-              <Grid>
-                <Input label="Ürün" name="urun" value={form.urun} update={update} />
-                <Input label="Marka" name="marka" value={form.marka} update={update} />
-                <Input label="Alış Fiyatı" name="alisFiyati" type="number" value={form.alisFiyati} update={update} />
-                <Readonly label="Tedarikçiye Ödenecek Tutar" value={calc.tedarikciyeOdenecekTutar} />
-                <Input label="Fatura No" name="faturaNo" value={form.faturaNo} update={update} />
-                <Input label="Tedarikçi Fatura Tutarı" name="tedarikciFaturaTutar" type="number" value={form.tedarikciFaturaTutar} update={update} />
-                <Input label="Peşin Satış Fiyatı" name="pesinSatisFiyati" type="number" value={form.pesinSatisFiyati} update={update} />
-                <Readonly label="Ton Başı Kar" value={calc.tonBasiKar} />
-              </Grid>
-            </Panel>
-
-            <Panel title="Sipariş ve Teslimat">
-              <Grid>
-                <Input label="Sipariş Tonajı" name="siparisTonaj" type="number" value={form.siparisTonaj} update={update} />
-                <Input label="Teslim Olan Tonaj" name="teslimOlanTonaj" type="number" value={form.teslimOlanTonaj} update={update} />
-                <Readonly label="Eksik Tonaj" value={calc.eksikTonaj} />
-                <Input label="Nakliye" name="nakliye" type="number" value={form.nakliye} update={update} />
-                <Input label="Sevk Yeri" name="sevkYeri" value={form.sevkYeri} update={update} />
-                <Input label="Not" name="not" value={form.not} update={update} />
-              </Grid>
-            </Panel>
-
-            <Panel title="Vade ve Ödeme">
-              <Grid>
-                <Input label="Yapılan Ödeme" name="yapilanOdeme" type="number" value={form.yapilanOdeme} update={update} />
-                <Input label="Vade Tarihi" name="vadeTarihi" type="date" value={form.vadeTarihi} update={update} />
-                <Input label="Vade Farkı" name="vadeFarki" type="number" value={form.vadeFarki} update={update} />
-                <Input label="Vade Süresi" name="vadeSuresi" value={form.vadeSuresi} update={update} />
-                <Readonly label="Vadeli Fiyat" value={calc.vadeliFiyat} />
-              </Grid>
-            </Panel>
-
-            <Panel title="Kayıttan Sonra Girilecek Operasyon Bilgileri">
-              <Grid>
-                <Input label="Plaka" name="plaka" value={form.plaka} update={update} />
-                <Input label="Sevk Durumu" name="sevkDurumu" value={form.sevkDurumu} update={update} />
-                <Input label="Gelen Fatura" name="gelenFatura" value={form.gelenFatura} update={update} />
-                <Input label="Sevk No" name="sevkNo" value={form.sevkNo} update={update} />
-                <Input label="GTS" name="gts" value={form.gts} update={update} />
-                <Input label="Fatura" name="fatura" value={form.fatura} update={update} />
-              </Grid>
-            </Panel>
-          </div>
-
-          <aside className="h-fit rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200 lg:sticky lg:top-8">
-            <h2 className="text-xl font-black text-slate-950">Otomatik Özet</h2>
-
-            <div className="mt-6 space-y-4">
-              <Summary label="Tedarikçiye Ödenecek" value={calc.tedarikciyeOdenecekTutar} />
-              <Summary label="Bayiye Satış Toplamı" value={calc.bayiSatisToplam} />
-              <Summary label="Ton Başı Kar" value={calc.tonBasiKar} />
-              <Summary label="Eksik Tonaj" value={calc.eksikTonaj} suffix=" ton" />
-              <Summary label="Perakende Karı" value={calc.perakendeKari} />
-              <Summary label="Kar %" value={calc.karYuzde} suffix="%" />
-              <Summary label="Vadeli Fiyat" value={calc.vadeliFiyat} />
+        <section className="rounded-[32px] bg-slate-950 p-6 text-white shadow-2xl shadow-slate-900/10">
+          <div className="flex flex-col justify-between gap-5 md:flex-row md:items-center">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.24em] text-emerald-300">
+                Google Sheet Bağlantısı
+              </p>
+              <h1 className="mt-2 text-3xl font-black tracking-tight">
+                Siparişler
+              </h1>
+              <p className="mt-2 text-sm text-white/60">
+                Siparişler Google Sheet üzerinden canlı okunur.
+              </p>
             </div>
-          </aside>
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={loadSiparisler}
+                disabled={loading}
+                className="rounded-2xl bg-white/10 px-5 py-3 text-sm font-black text-white ring-1 ring-white/15 disabled:opacity-50"
+              >
+                {loading ? "Yükleniyor..." : "Yenile"}
+              </button>
+
+              <Link
+                href="/admin/siparisler/form"
+                prefetch={false}
+                className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950"
+              >
+                Yeni Sipariş
+              </Link>
+            </div>
+          </div>
+
+          <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <MiniStat label="Toplam Sipariş" value={siparisler.length} />
+            <MiniStat label="Fatura Kesilebilir" value={readyCount} />
+            <MiniStat label="Eksik Kontrol" value={blockedCount} />
+            <MiniStat label="Listelenen" value={filtered.length} />
+          </div>
+
+          {message && (
+            <div className="mt-4 rounded-2xl bg-white/10 p-4 text-sm font-bold ring-1 ring-white/15">
+              {message}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-[28px] bg-white p-4 shadow-sm ring-1 ring-slate-100">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Sipariş no, bayi, ürün, plaka ara..."
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm font-semibold outline-none focus:border-[#00a884] focus:ring-4 focus:ring-emerald-100 md:max-w-md"
+            />
+
+            <div className="flex flex-wrap gap-2">
+              <FilterButton active={filter === "all"} onClick={() => setFilter("all")}>
+                Tümü
+              </FilterButton>
+              <FilterButton active={filter === "ready"} onClick={() => setFilter("ready")}>
+                Fatura Kesilebilir
+              </FilterButton>
+              <FilterButton active={filter === "blocked"} onClick={() => setFilter("blocked")}>
+                Eksik Kontrol
+              </FilterButton>
+            </div>
+          </div>
+
+          <div className="mt-5 overflow-x-auto">
+            <div className="min-w-[1200px] space-y-2">
+              <div className="grid grid-cols-[120px_1.2fr_1.1fr_100px_90px_120px_130px_120px_100px_150px_130px] gap-3 px-4 text-[11px] font-black uppercase tracking-wide text-slate-400">
+                <div>Sipariş</div>
+                <div>Bayi</div>
+                <div>Ürün</div>
+                <div>Plaka</div>
+                <div>Tonaj</div>
+                <div>Birim Fiyat</div>
+                <div>Toplam</div>
+                <div>Sevk</div>
+                <div>GTS</div>
+                <div>Alış Faturası</div>
+                <div>İşlem</div>
+              </div>
+
+              {loading ? (
+                <div className="rounded-2xl bg-slate-50 p-6 text-sm font-bold text-slate-500">
+                  Siparişler yükleniyor...
+                </div>
+              ) : filtered.length === 0 ? (
+                <div className="rounded-2xl bg-slate-50 p-8 text-center">
+                  <div className="text-4xl">📦</div>
+                  <h2 className="mt-3 text-xl font-black text-slate-950">
+                    Sipariş bulunamadı
+                  </h2>
+                </div>
+              ) : (
+                filtered.map((s, index) => {
+                  const status = getInvoiceStatus(s);
+const tonaj = numberValue(
+  getField(s, ["siparis", "teslim_olan_tonaj", "tonaj", "miktar"]),
+);                  const birimFiyat = numberValue(
+getField(s, [
+  "bayiye_satis_tutari_toplam",
+  "bayi_satis_toplam",
+  "toplam_tutar",
+  "toplam",
+  "tutar",
+])
+                  );
+                  const toplam =
+                    numberValue(
+                      getField(s, [
+                        "bayi_satis_toplam",
+                        "toplam_tutar",
+                        "toplam",
+                        "tutar",
+                      ]),
+                    ) || tonaj * birimFiyat;
+
+                  return (
+                    <div
+                      key={getField(s, ["id", "satis_id", "siparis_no"]) || index}
+                      className="grid grid-cols-[120px_1.2fr_1.1fr_100px_90px_120px_130px_120px_100px_150px_130px] items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3"
+                    >
+                      <div>
+                        <p className="text-sm font-black text-slate-950">
+                          #{getField(s, ["satis_id", "siparis_no", "id"]) || index + 1}
+                        </p>
+                        <p className="text-[11px] font-semibold text-slate-400">
+                          {getField(s, ["satis_tarihi", "tarih"]) || "-"}
+                        </p>
+                      </div>
+
+                      <div className="truncate text-sm font-bold text-slate-800">
+                        {getField(s, ["bayi", "musteri", "bayi_adi"]) || "-"}
+                      </div>
+
+                      <div>
+                        <p className="truncate text-sm font-black text-slate-950">
+                          {getField(s, ["urun", "urun_adi", "malzeme"]) || "-"}
+                        </p>
+                        <p className="text-[11px] font-semibold text-slate-400">
+                          {getField(s, ["marka"]) || ""}
+                        </p>
+                      </div>
+
+                      <div className="text-sm font-black text-slate-700">
+                        {getField(s, ["plaka"]) || "-"}
+                      </div>
+
+                      <div className="text-sm font-black text-slate-950">
+                        {formatNumber(tonaj)} ton
+                      </div>
+
+                      <div className="text-sm font-bold text-slate-700">
+                        {formatMoney(birimFiyat)}
+                      </div>
+
+                      <div className="text-sm font-black text-emerald-700">
+                        {formatMoney(toplam)}
+                      </div>
+
+                      <Badge ok={status.sevkOk} text={status.sevkOk ? "Tamam" : "Eksik"} />
+                      <Badge ok={status.gtsOk} text={status.gtsOk ? "Girildi" : "Eksik"} />
+                      <Badge ok={status.alisOk} text={status.alisOk ? "Eşleşti" : "Yok"} />
+
+                      <div>
+                        {status.canInvoice ? (
+                          <Link
+                            href={`/admin/siparisler/fatura-kes?siparisId=${
+                              getField(s, ["id", "satis_id", "siparis_no"]) || index
+                            }`}
+                            prefetch={false}
+                            className="inline-flex rounded-xl bg-gradient-to-r from-[#00a884] to-[#00c297] px-4 py-2 text-xs font-black text-white shadow-lg shadow-emerald-900/10"
+                          >
+                            Fatura Kes
+                          </Link>
+                        ) : (
+                          <div>
+                            <button
+                              type="button"
+                              disabled
+                              className="rounded-xl bg-slate-200 px-4 py-2 text-xs font-black text-slate-400"
+                            >
+                              Kilitli
+                            </button>
+
+                            <p className="mt-1 text-[10px] font-bold leading-4 text-red-500">
+                              {status.missing.join(", ")}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
         </section>
       </div>
     </main>
   );
 }
 
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function getInvoiceStatus(s: any) {
+  const sevkDurumu = String(
+    getField(s, ["sevk_durumu", "sevkdumu", "sevk", "sevk_yapildi_mi"]) || "",
+  ).toLowerCase();
+
+  const gts = String(
+    getField(s, ["gts", "gts_cikisi", "gts_cikisi_yapildi_mi"]) || "",
+  ).toLowerCase();
+
+  const alis = String(
+    getField(s, [
+      "alis_faturasi",
+      "alis_faturasi_geldi_mi",
+      "gelen_fatura",
+      "matched_purchase_invoice_id",
+      "matched_purchase_invoice_no",
+    ]) || "",
+  ).toLowerCase();
+
+  const sevkOk =
+    sevkDurumu.includes("evet") ||
+    sevkDurumu.includes("sevk edildi") ||
+    sevkDurumu.includes("tamam") ||
+    sevkDurumu.includes("yapildi") ||
+    sevkDurumu.includes("yapıldı");
+
+  const gtsOk =
+    gts.includes("evet") ||
+    gts.includes("girildi") ||
+    gts.includes("cikis") ||
+    gts.includes("çıkış") ||
+    gts.includes("yapildi") ||
+    gts.includes("yapıldı");
+
+  const alisOk =
+    Boolean(alis) &&
+    !["hayir", "hayır", "yok", "false", "0", "bekliyor"].includes(alis);
+
+  const missing: string[] = [];
+
+  if (!sevkOk) missing.push("Sevk yok");
+  if (!gtsOk) missing.push("GTS yok");
+  if (!alisOk) missing.push("Alış faturası yok");
+
+  return {
+    sevkOk,
+    gtsOk,
+    alisOk,
+    canInvoice: sevkOk && gtsOk && alisOk,
+    missing,
+  };
+}
+
+function getField(row: any, keys: string[]) {
+  for (const key of keys) {
+    if (row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== "") {
+      return row[key];
+    }
+  }
+  return "";
+}
+
+function Badge({ ok, text }: { ok: boolean; text: string }) {
   return (
-    <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-      <h2 className="text-xl font-black text-slate-950">{title}</h2>
-      <div className="mt-6">{children}</div>
-    </section>
+    <span
+      className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-black ring-1 ${
+        ok
+          ? "bg-emerald-50 text-emerald-700 ring-emerald-100"
+          : "bg-red-50 text-red-700 ring-red-100"
+      }`}
+    >
+      {text}
+    </span>
   );
 }
 
-function Grid({ children }: { children: React.ReactNode }) {
-  return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{children}</div>;
-}
-
-function Input({
-  label,
-  name,
-  value,
-  update,
-  type = "text",
+function FilterButton({
+  active,
+  onClick,
+  children,
 }: {
-  label: string;
-  name: string;
-  value: string;
-  update: (name: string, value: string) => void;
-  type?: string;
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
 }) {
   return (
-    <label className="block">
-      <span className="text-sm font-bold text-slate-600">{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => update(name, e.target.value)}
-        className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-emerald-700"
-      />
-    </label>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-xl px-4 py-2 text-xs font-black ring-1 ${
+        active
+          ? "bg-slate-950 text-white ring-slate-950"
+          : "bg-slate-50 text-slate-600 ring-slate-200"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
-function Readonly({ label, value }: { label: string; value: number }) {
+function MiniStat({ label, value }: { label: string; value: number }) {
   return (
-    <label className="block">
-      <span className="text-sm font-bold text-slate-600">{label}</span>
-      <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-black text-emerald-900">
-        {format(value)}
-      </div>
-    </label>
-  );
-}
-
-function Summary({ label, value, suffix = " TL" }: { label: string; value: number; suffix?: string }) {
-  return (
-    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-      <span className="text-sm font-semibold text-slate-600">{label}</span>
-      <span className="font-black text-emerald-900">
-        {format(value)}
-        {suffix}
-      </span>
+    <div className="rounded-2xl bg-white/10 p-4 ring-1 ring-white/15">
+      <p className="text-xs font-bold text-white/55">{label}</p>
+      <p className="mt-1 text-2xl font-black text-white">{value}</p>
     </div>
   );
 }
 
-function format(value: number) {
+function numberValue(value: any) {
+  if (typeof value === "number") return value;
+
+  const normalized = String(value || "")
+    .replace(/\./g, "")
+    .replace(",", ".")
+    .replace(/[^\d.-]/g, "");
+
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatNumber(value: number) {
   return new Intl.NumberFormat("tr-TR", {
+    maximumFractionDigits: 2,
+  }).format(value || 0);
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("tr-TR", {
+    style: "currency",
+    currency: "TRY",
     maximumFractionDigits: 2,
   }).format(value || 0);
 }

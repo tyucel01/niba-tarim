@@ -8,6 +8,70 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+function parseWhatsAppMessage(message: any) {
+  const type = message?.type || "unknown";
+
+  if (type === "text") {
+    return message.text?.body || "";
+  }
+
+  if (type === "reaction") {
+    return message.reaction?.emoji || "👍";
+  }
+
+  if (type === "button") {
+    return message.button?.text || "[buton cevabı]";
+  }
+
+  if (type === "interactive") {
+    return (
+      message.interactive?.button_reply?.title ||
+      message.interactive?.list_reply?.title ||
+      "[interaktif cevap]"
+    );
+  }
+
+  if (type === "image") {
+    return message.image?.caption
+      ? `🖼️ Görsel: ${message.image.caption}`
+      : "🖼️ Görsel gönderildi";
+  }
+
+  if (type === "video") {
+    return message.video?.caption
+      ? `🎥 Video: ${message.video.caption}`
+      : "🎥 Video gönderildi";
+  }
+
+  if (type === "audio") {
+    return "🎧 Sesli mesaj gönderildi";
+  }
+
+  if (type === "voice") {
+    return "🎙️ Sesli mesaj gönderildi";
+  }
+
+  if (type === "document") {
+    return message.document?.filename
+      ? `📎 Belge: ${message.document.filename}`
+      : "📎 Belge gönderildi";
+  }
+
+  if (type === "sticker") {
+    return "🧩 Sticker gönderildi";
+  }
+
+  if (type === "location") {
+    return "📍 Konum gönderildi";
+  }
+
+  if (type === "contacts") {
+    return "👤 Kişi kartı gönderildi";
+  }
+
+  return `[${type} mesaj]`;
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
 
@@ -43,20 +107,8 @@ export async function POST(req: Request) {
           const contactProfile = contacts.find((c: any) => c.wa_id === phone);
           const name = contactProfile?.profile?.name || null;
 
-          let messageText = "";
-
-          if (message.type === "text") {
-            messageText = message.text?.body || "";
-          } else if (message.type === "button") {
-            messageText = message.button?.text || "";
-          } else if (message.type === "interactive") {
-            messageText =
-              message.interactive?.button_reply?.title ||
-              message.interactive?.list_reply?.title ||
-              "";
-          } else {
-            messageText = `[${message.type || "unknown"} mesaj]`;
-          }
+          const messageText = parseWhatsAppMessage(message);
+          const messageType = message.type || "unknown";
 
           const { data: existingContact } = await supabase
             .from("whatsapp_contacts")
@@ -132,7 +184,7 @@ export async function POST(req: Request) {
                 contact_id: contactId,
                 phone,
                 direction: "inbound",
-                message_type: message.type || "text",
+                message_type: messageType,
                 message_text: messageText,
                 raw_payload: message,
               },

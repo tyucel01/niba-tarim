@@ -1,0 +1,18 @@
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  "https://yurhfnikfxkkywogpopw.supabase.co",
+  "BURAYA_SERVICE_ROLE_KEY"
+);
+
+const userId = "BURAYA_USER_ID";
+const phone = "+905XXXXXXXXX";
+
+const { data, error } = await supabase.auth.admin.updateUserById(userId, {
+  phone,
+  phone_confirm: true,
+});
+
+console.log({ data, error });
+touch update-user-phone.mjs
+

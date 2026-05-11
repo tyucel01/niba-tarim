@@ -107,10 +107,17 @@ const contactImage =
 export default function NibaTarimHomepage() {
   return (
     <main className="min-h-screen bg-white text-slate-950">
+      
+      <script
+        async
+        src="https://t.contentsquare.net/uxa/1ab6e6cc76b6b.js"
+      />
+
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(productSchema) }}
       />
+
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
