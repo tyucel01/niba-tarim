@@ -362,14 +362,13 @@ if (!userPhone) {
           <AdminAction icon="📊" title="WhatsApp Raporları" desc="Gönderim ilerlemesini ve başarısız mesajları takip et." href="/admin/whatsapp/raporlar" />
           <AdminAction icon="👥" title="Kullanıcılar" desc="Admin kullanıcıları ve erişimleri yönet." href="/admin/kullanicilar" />
           <AdminAction icon="📝" title="Sipariş Formu" desc="Müşteri ve bayi sipariş formu oluştur." href="/admin/siparisler/form" />
-          <AdminAction icon="💰" title="Fiyat Sirkü" desc="Güncel fiyat paylaşım süreçlerini yönet." href="/admin/fiyat-formu" />
-          <AdminAction
+<AdminAction
   icon="💳"
   title="Kart Çekimleri"
-  desc="Tedarikçi ödemeleri ve müşteri tahsilatlarını Paraşüt carileriyle işle."
+  desc="Tedarikçi ve müşteri kart çekimlerini yönet."
   href="/admin/finans/kart-cekimleri"
-  highlight
 />
+          <AdminAction icon="💰" title="Fiyat Sirkü" desc="Güncel fiyat paylaşım süreçlerini yönet." href="/admin/fiyat-formu" />
         </section>
       </div>
     </main>

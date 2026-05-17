@@ -93,54 +93,88 @@ export default function SiparislerPage() {
     loadSuggestions();
   }, []);
 
-  async function loadNextOrderNo() {
-    const { data, error } = await supabase
-      .from("siparisler")
-      .select("satisId")
-      .order("satisId", { ascending: false })
-      .limit(1);
+async function loadNextOrderNo() {
+  try {
+    const res = await fetch(`/api/admin/siparisler?t=${Date.now()}`, {
+      cache: "no-store",
+    });
 
-    const last = !error ? data?.[0]?.satisId : "";
-    const nextNumber = (Number(last) || 0) + 1;
+    const data = await res.json();
+    const rows = data?.rows || [];
 
-    setForm((prev) => ({
-      ...prev,
-      satisId: String(nextNumber),
-      satisTarihi: prev.satisTarihi || new Date().toISOString().slice(0, 10),
-    }));
-  }
+    let maxNumber = 0;
 
-  async function loadSuggestions() {
-    const fromStorage: Record<string, string[]> = {};
+    rows.forEach((row: any) => {
+      const raw = String(row.satisId || "").trim();
+      const match = raw.match(/(\d+)$/);
 
-    suggestionFields.forEach((field) => {
-      try {
-        fromStorage[field] = JSON.parse(
-          localStorage.getItem(`siparis_suggestions_${field}`) || "[]",
-        );
-      } catch {
-        fromStorage[field] = [];
+      if (!match) return;
+
+      const num = Number(match[1]);
+
+      if (Number.isFinite(num) && num > maxNumber) {
+        maxNumber = num;
       }
     });
 
-    const { data } = await supabase
-      .from("siparisler")
-      .select(suggestionFields.join(","));
+    const nextNumber = maxNumber + 1;
 
-    const merged: Record<string, string[]> = { ...fromStorage };
+    setForm((prev) => ({
+      ...prev,
+      satisId: `P-${nextNumber}`,
+      satisTarihi: prev.satisTarihi || new Date().toISOString().slice(0, 10),
+    }));
+  } catch {
+    setForm((prev) => ({
+      ...prev,
+      satisTarihi: prev.satisTarihi || new Date().toISOString().slice(0, 10),
+    }));
+  }
+}
+  async function loadSuggestions() {
+  const fromStorage: Record<string, string[]> = {};
 
-    suggestionFields.forEach((field) => {
-      const dbValues =
-        data
-          ?.map((row: any) => row[field])
-          .filter((v: string) => typeof v === "string" && v.trim()) || [];
+  suggestionFields.forEach((field) => {
+    try {
+      fromStorage[field] = JSON.parse(
+        localStorage.getItem(`siparis_suggestions_${field}`) || "[]",
+      );
+    } catch {
+      fromStorage[field] = [];
+    }
+  });
 
-      merged[field] = uniqueValues([...(fromStorage[field] || []), ...dbValues]);
+  let rows: any[] = [];
+
+  try {
+    const res = await fetch(`/api/admin/siparisler?t=${Date.now()}`, {
+      cache: "no-store",
     });
 
-    setSuggestions(merged);
+    const data = await res.json();
+
+    if (data?.success && Array.isArray(data.rows)) {
+      rows = data.rows;
+    }
+  } catch {
+    rows = [];
   }
 
+  const merged: Record<string, string[]> = {};
+
+  suggestionFields.forEach((field) => {
+    const dbValues = rows
+      .map((row: any) => row[field])
+      .filter((v: any) => typeof v === "string" && v.trim());
+
+    merged[field] = uniqueValues([
+      ...dbValues,
+      ...(fromStorage[field] || []),
+    ]).slice(0, 500);
+  });
+
+  setSuggestions(merged);
+}
   function saveSuggestion(name: keyof FormState, value: string) {
     if (!suggestionFields.includes(name)) return;
 
@@ -158,10 +192,9 @@ export default function SiparislerPage() {
     });
   }
 
-  function update(name: keyof FormState, value: string) {
-    setForm((prev) => ({ ...prev, [name]: value }));
-    saveSuggestion(name, value);
-  }
+function update(name: keyof FormState, value: string) {
+  setForm((prev) => ({ ...prev, [name]: value }));
+}
 
   const calc = useMemo(() => {
     const alis = Number(form.alisFiyati) || 0;
@@ -245,11 +278,7 @@ export default function SiparislerPage() {
         nakliye: Number(form.nakliye) || 0,
         tedarikciyeOdenecekTutar: calc.tedarikciyeOdenecekTutar,
         bayiSatisToplam: calc.bayiSatisToplam,
-        tonBasiKar: calc.tonBasiKar,
-        eksikTonaj: calc.eksikTonaj,
-        perakendeKari: calc.perakendeKari,
-        karYuzde: calc.karYuzde,
-        vadeliFiyat: calc.vadeliFiyat,
+
       };
 
       const { error } = await supabase.from("siparisler").insert([payload]);
@@ -265,11 +294,12 @@ export default function SiparislerPage() {
 
       setForm({
         ...initialForm,
+        satisId: "",
         satisTarihi: new Date().toISOString().slice(0, 10),
       });
 
-      await loadNextOrderNo();
       await loadSuggestions();
+      await loadNextOrderNo();
     } catch (err) {
       setMessage("❌ Kayıt hatası: " + String(err));
     } finally {
@@ -352,15 +382,17 @@ className="sticky top-4 z-40 rounded-2xl bg-gradient-to-r from-[#00a884] to-[#00
               </Grid>
             </Panel>
 
-            <Panel title="Vade ve Ödeme">
-              <Grid>
-                <Input label="Yapılan Ödeme" name="yapilanOdeme" type="number" value={form.yapilanOdeme} update={update} />
-                <Input label="Vade Tarihi" name="vadeTarihi" type="date" value={form.vadeTarihi} update={update} />
-                <Input label="Vade Farkı" name="vadeFarki" type="number" value={form.vadeFarki} update={update} />
-                <Input label="Vade Süresi" name="vadeSuresi" value={form.vadeSuresi} update={update} />
-                <Readonly label="Vadeli Fiyat" value={calc.vadeliFiyat} />
-              </Grid>
-            </Panel>
+{form.satisTuru !== "Peşin" && (
+  <Panel title="Vade ve Ödeme">
+    <Grid>
+      <Input label="Yapılan Ödeme" name="yapilanOdeme" type="number" value={form.yapilanOdeme} update={update} />
+      <Input label="Vade Tarihi" name="vadeTarihi" type="date" value={form.vadeTarihi} update={update} />
+      <Input label="Vade Farkı" name="vadeFarki" type="number" value={form.vadeFarki} update={update} />
+      <Input label="Vade Süresi" name="vadeSuresi" value={form.vadeSuresi} update={update} />
+      <Readonly label="Vadeli Fiyat" value={calc.vadeliFiyat} />
+    </Grid>
+  </Panel>
+)}
 
             <Panel title="Kayıttan Sonra Girilecek Operasyon Bilgileri">
               <Grid>
@@ -459,27 +491,77 @@ function SmartInput({
   update: (name: keyof FormState, value: string) => void;
   suggestions?: string[];
 }) {
-  const listId = `list-${name}`;
+  const [open, setOpen] = useState(false);
+
+  const filtered = suggestions
+    .filter((x) =>
+      x.toLocaleLowerCase("tr-TR")
+        .includes(value.toLocaleLowerCase("tr-TR"))
+    )
+    .slice(0, 8);
+
+  const exactMatch = suggestions.some(
+    (x) =>
+      x.toLocaleLowerCase("tr-TR").trim() ===
+      value.toLocaleLowerCase("tr-TR").trim()
+  );
 
   return (
-    <label className="block">
-      <span className="text-sm font-bold text-slate-600">{label}</span>
-      <input
-        type="text"
-        value={value}
-        list={suggestions.length > 0 ? listId : undefined}
-        onChange={(e) => update(name, e.target.value)}
-        className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#00a884] focus:ring-4 focus:ring-emerald-100"
-      />
+    <div className="relative">
+      <label className="block">
+        <span className="text-sm font-bold text-slate-600">
+          {label}
+        </span>
 
-      {suggestions.length > 0 && (
-        <datalist id={listId}>
-          {suggestions.map((item) => (
-            <option key={item} value={item} />
-          ))}
-        </datalist>
+        <input
+          type="text"
+          value={value}
+          onFocus={() => setOpen(true)}
+          onBlur={() => {
+            setTimeout(() => setOpen(false), 150);
+          }}
+          onChange={(e) => update(name, e.target.value)}
+          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#00a884] focus:ring-4 focus:ring-emerald-100"
+        />
+      </label>
+
+      {open && (
+        <div className="absolute z-50 mt-2 max-h-64 w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl">
+          {filtered.length > 0 ? (
+            filtered.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => {
+                  update(name, item);
+                  setOpen(false);
+                }}
+                className="flex w-full items-center rounded-xl px-3 py-3 text-left text-sm font-bold text-slate-700 transition hover:bg-emerald-50"
+              >
+                {item}
+              </button>
+            ))
+          ) : (
+            <div className="px-3 py-3 text-sm font-bold text-slate-400">
+              Sonuç bulunamadı
+            </div>
+          )}
+
+          {value.trim() && !exactMatch && (
+            <button
+              type="button"
+              onClick={() => {
+                update(name, value);
+                setOpen(false);
+              }}
+              className="mt-2 flex w-full items-center rounded-xl border border-dashed border-emerald-300 bg-emerald-50 px-3 py-3 text-left text-sm font-black text-emerald-700 transition hover:bg-emerald-100"
+            >
+              + “{value}” ekle
+            </button>
+          )}
+        </div>
       )}
-    </label>
+    </div>
   );
 }
 

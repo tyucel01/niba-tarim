@@ -11,13 +11,16 @@ export default function SiparislerPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [message, setMessage] = useState("");
+  const [page, setPage] = useState(1);
+
+  const pageSize = 25;
 
   async function loadSiparisler() {
     try {
       setLoading(true);
       setMessage("");
 
-      const res = await fetch(`/api/admin/google-sheets/siparisler?t=${Date.now()}`, {
+      const res = await fetch(`/api/admin/siparisler?t=${Date.now()}`, {
         cache: "no-store",
       });
 
@@ -41,6 +44,10 @@ export default function SiparislerPage() {
     loadSiparisler();
   }, []);
 
+  useEffect(() => {
+    setPage(1);
+  }, [search, filter]);
+
   const filtered = useMemo(() => {
     return siparisler.filter((s) => {
       const text = JSON.stringify(s).toLowerCase();
@@ -54,6 +61,12 @@ export default function SiparislerPage() {
     });
   }, [siparisler, search, filter]);
 
+  const paginated = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, page]);
+
+  const totalPages = Math.max(Math.ceil(filtered.length / pageSize), 1);
   const readyCount = siparisler.filter((s) => getInvoiceStatus(s).canInvoice).length;
   const blockedCount = siparisler.length - readyCount;
 
@@ -68,17 +81,25 @@ export default function SiparislerPage() {
           <div className="flex flex-col justify-between gap-5 md:flex-row md:items-center">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.24em] text-emerald-300">
-                Google Sheet Bağlantısı
+                Supabase Sipariş Verisi
               </p>
               <h1 className="mt-2 text-3xl font-black tracking-tight">
                 Siparişler
               </h1>
               <p className="mt-2 text-sm text-white/60">
-                Siparişler Google Sheet üzerinden canlı okunur.
+                Göz ikonuna tıklayarak sipariş detayına gidebilir, operasyon bilgilerini oradan yönetebilirsin.
               </p>
             </div>
 
             <div className="flex flex-wrap gap-3">
+              <Link
+                href="/admin/siparisler/import"
+                prefetch={false}
+                className="rounded-2xl bg-white/10 px-5 py-3 text-sm font-black text-white ring-1 ring-white/15"
+              >
+                Excel Import
+              </Link>
+
               <button
                 type="button"
                 onClick={loadSiparisler}
@@ -88,13 +109,15 @@ export default function SiparislerPage() {
                 {loading ? "Yükleniyor..." : "Yenile"}
               </button>
 
-              <Link
-                href="/admin/siparisler/form"
-                prefetch={false}
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = "/admin/siparisler/yeni-siparis";
+                }}
                 className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950"
               >
                 Yeni Sipariş
-              </Link>
+              </button>
             </div>
           </div>
 
@@ -113,12 +136,12 @@ export default function SiparislerPage() {
         </section>
 
         <section className="rounded-[28px] bg-white p-4 shadow-sm ring-1 ring-slate-100">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Sipariş no, bayi, ürün, plaka ara..."
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm font-semibold outline-none focus:border-[#00a884] focus:ring-4 focus:ring-emerald-100 md:max-w-md"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm font-semibold outline-none focus:border-[#00a884] focus:ring-4 focus:ring-emerald-100 xl:max-w-lg"
             />
 
             <div className="flex flex-wrap gap-2">
@@ -134,11 +157,13 @@ export default function SiparislerPage() {
             </div>
           </div>
 
-          <div className="mt-5 overflow-x-auto">
-            <div className="min-w-[1200px] space-y-2">
-              <div className="grid grid-cols-[120px_1.2fr_1.1fr_100px_90px_120px_130px_120px_100px_150px_130px] gap-3 px-4 text-[11px] font-black uppercase tracking-wide text-slate-400">
+          <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-100">
+            <div className="min-w-[1660px] space-y-2 p-2">
+              <div className="grid grid-cols-[70px_120px_170px_190px_170px_120px_100px_130px_140px_100px_100px_140px_120px] gap-3 px-4 text-[11px] font-black uppercase tracking-wide text-slate-400">
+                <div>Gör</div>
                 <div>Sipariş</div>
                 <div>Bayi</div>
+                <div>Tedarikçi</div>
                 <div>Ürün</div>
                 <div>Plaka</div>
                 <div>Tonaj</div>
@@ -162,70 +187,77 @@ export default function SiparislerPage() {
                   </h2>
                 </div>
               ) : (
-                filtered.map((s, index) => {
+                paginated.map((s, index) => {
                   const status = getInvoiceStatus(s);
-const tonaj = numberValue(
-  getField(s, ["siparis", "teslim_olan_tonaj", "tonaj", "miktar"]),
-);                  const birimFiyat = numberValue(
-getField(s, [
-  "bayiye_satis_tutari_toplam",
-  "bayi_satis_toplam",
-  "toplam_tutar",
-  "toplam",
-  "tutar",
-])
-                  );
-                  const toplam =
-                    numberValue(
-                      getField(s, [
-                        "bayi_satis_toplam",
-                        "toplam_tutar",
-                        "toplam",
-                        "tutar",
-                      ]),
-                    ) || tonaj * birimFiyat;
+                  const alreadyInvoiced =
+                    Boolean(s.sales_invoice_id) || Boolean(s.sales_invoice_no);
+                  const globalIndex = (page - 1) * pageSize + index;
+                  const siparisNo = s.satisId || s.id || globalIndex + 1;
+                  const detailId = s.id || siparisNo;
 
                   return (
                     <div
-                      key={getField(s, ["id", "satis_id", "siparis_no"]) || index}
-                      className="grid grid-cols-[120px_1.2fr_1.1fr_100px_90px_120px_130px_120px_100px_150px_130px] items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3"
+                      key={s.id || siparisNo || globalIndex}
+                      className="grid grid-cols-[70px_120px_170px_190px_170px_120px_100px_130px_140px_100px_100px_140px_120px] items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 transition hover:bg-emerald-50/60"
                     >
                       <div>
+                        <Link
+                          href={`/admin/siparisler/${encodeURIComponent(String(detailId))}`}
+                          prefetch={false}
+                          className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-lg shadow-sm ring-1 ring-slate-200 hover:bg-emerald-50"
+                          title="Sipariş Detayı"
+                        >
+                          👁
+                        </Link>
+                      </div>
+
+                      <div>
                         <p className="text-sm font-black text-slate-950">
-                          #{getField(s, ["satis_id", "siparis_no", "id"]) || index + 1}
+                          #{siparisNo}
                         </p>
                         <p className="text-[11px] font-semibold text-slate-400">
-                          {getField(s, ["satis_tarihi", "tarih"]) || "-"}
+                          {formatDate(s.satisTarihi)}
                         </p>
                       </div>
 
-                      <div className="truncate text-sm font-bold text-slate-800">
-                        {getField(s, ["bayi", "musteri", "bayi_adi"]) || "-"}
+                      <div>
+                        <p className="truncate text-sm font-black text-slate-800">
+                          {s.bayi || "-"}
+                        </p>
+                        <p className="text-[11px] font-semibold text-slate-400">
+                          {s.siparisAlan || ""}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="truncate text-sm font-black text-slate-800">
+                          {s.tedarikciler || "-"}
+                        </p>
                       </div>
 
                       <div>
                         <p className="truncate text-sm font-black text-slate-950">
-                          {getField(s, ["urun", "urun_adi", "malzeme"]) || "-"}
+                          {s.urun || "-"}
                         </p>
                         <p className="text-[11px] font-semibold text-slate-400">
-                          {getField(s, ["marka"]) || ""}
+                          {s.marka || ""}
                         </p>
                       </div>
 
                       <div className="text-sm font-black text-slate-700">
-                        {getField(s, ["plaka"]) || "-"}
+                        {s.plaka || "-"}
                       </div>
 
                       <div className="text-sm font-black text-slate-950">
-                        {formatNumber(tonaj)} ton
+                        {formatNumber(numberValue(s.siparisTonaj))} ton
                       </div>
 
                       <div className="text-sm font-bold text-slate-700">
-                        {formatMoney(birimFiyat)}
+                        {formatMoney(numberValue(s.pesinSatisFiyati))}
                       </div>
 
                       <div className="text-sm font-black text-emerald-700">
-                        {formatMoney(toplam)}
+                        {formatMoney(numberValue(s.bayiSatisToplam))}
                       </div>
 
                       <Badge ok={status.sevkOk} text={status.sevkOk ? "Tamam" : "Eksik"} />
@@ -233,11 +265,15 @@ getField(s, [
                       <Badge ok={status.alisOk} text={status.alisOk ? "Eşleşti" : "Yok"} />
 
                       <div>
-                        {status.canInvoice ? (
+                        {alreadyInvoiced ? (
+                          <div className="rounded-xl bg-emerald-100 px-4 py-2 text-center text-xs font-black text-emerald-700 ring-1 ring-emerald-200">
+                            Fatura Kesildi
+                          </div>
+                        ) : status.canInvoice ? (
                           <Link
-                            href={`/admin/siparisler/fatura-kes?siparisId=${
-                              getField(s, ["id", "satis_id", "siparis_no"]) || index
-                            }`}
+                            href={`/admin/siparisler/fatura-kes?siparisId=${encodeURIComponent(
+                              String(s.id || siparisNo)
+                            )}`}
                             prefetch={false}
                             className="inline-flex rounded-xl bg-gradient-to-r from-[#00a884] to-[#00c297] px-4 py-2 text-xs font-black text-white shadow-lg shadow-emerald-900/10"
                           >
@@ -265,6 +301,52 @@ getField(s, [
               )}
             </div>
           </div>
+
+          {!loading && filtered.length > 0 && (
+            <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <p className="text-xs font-bold text-slate-500">
+                Sayfa {page} / {totalPages}
+              </p>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                  className="rounded-xl bg-slate-100 px-4 py-2 text-xs font-black text-slate-700 disabled:opacity-40"
+                >
+                  Önceki
+                </button>
+
+                {Array.from({ length: Math.min(totalPages, 7) }).map((_, i) => {
+                  const pageNo = i + 1;
+                  return (
+                    <button
+                      key={pageNo}
+                      type="button"
+                      onClick={() => setPage(pageNo)}
+                      className={`rounded-xl px-4 py-2 text-xs font-black ${
+                        page === pageNo
+                          ? "bg-slate-950 text-white"
+                          : "bg-slate-100 text-slate-700"
+                      }`}
+                    >
+                      {pageNo}
+                    </button>
+                  );
+                })}
+
+                <button
+                  type="button"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+                  className="rounded-xl bg-slate-100 px-4 py-2 text-xs font-black text-slate-700 disabled:opacity-40"
+                >
+                  Sonraki
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       </div>
     </main>
@@ -272,23 +354,9 @@ getField(s, [
 }
 
 function getInvoiceStatus(s: any) {
-  const sevkDurumu = String(
-    getField(s, ["sevk_durumu", "sevkdumu", "sevk", "sevk_yapildi_mi"]) || "",
-  ).toLowerCase();
-
-  const gts = String(
-    getField(s, ["gts", "gts_cikisi", "gts_cikisi_yapildi_mi"]) || "",
-  ).toLowerCase();
-
-  const alis = String(
-    getField(s, [
-      "alis_faturasi",
-      "alis_faturasi_geldi_mi",
-      "gelen_fatura",
-      "matched_purchase_invoice_id",
-      "matched_purchase_invoice_no",
-    ]) || "",
-  ).toLowerCase();
+  const sevkDurumu = String(s.sevkDurumu || "").toLowerCase();
+  const gts = String(s.gts || "").toLowerCase();
+  const alis = String(s.gelenFatura || s.matched_purchase_invoice_no || "").toLowerCase();
 
   const sevkOk =
     sevkDurumu.includes("evet") ||
@@ -322,15 +390,6 @@ function getInvoiceStatus(s: any) {
     canInvoice: sevkOk && gtsOk && alisOk,
     missing,
   };
-}
-
-function getField(row: any, keys: string[]) {
-  for (const key of keys) {
-    if (row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== "") {
-      return row[key];
-    }
-  }
-  return "";
 }
 
 function Badge({ ok, text }: { ok: boolean; text: string }) {
@@ -404,4 +463,16 @@ function formatMoney(value: number) {
     currency: "TRY",
     maximumFractionDigits: 2,
   }).format(value || 0);
+}
+
+function formatDate(value: any) {
+  if (!value) return "-";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return date.toLocaleDateString("tr-TR");
 }
