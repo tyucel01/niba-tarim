@@ -530,7 +530,7 @@ export async function POST(req: NextRequest) {
     }
     const { data: existingOrder, error: existingOrderError } = await supabase
   .from("siparisler")
-  .select("id, gelenFatura, matched_purchase_invoice_id, matched_purchase_invoice_no")
+.select("id, gelenFatura, matched_purchase_invoice_id, matched_purchase_invoice_no, tedarikciyeOdenecekTutar")
   .eq("id", siparisId)
   .single();
 
@@ -702,6 +702,38 @@ const purchaseBillPayload = await buildPurchaseBillPayload(
       extractInvoiceTotal(verify.data) ||
       extractInvoiceTotal(createData) ||
       extractInvoiceTotal(convertData);
+
+      const matchedAmount =
+  toNumber(body?.matchedAmount) ||
+  toNumber(existingOrder?.tedarikciyeOdenecekTutar) ||
+  purchaseBillTotal;
+
+const { error: matchInsertError } = await supabase
+  .from("purchase_invoice_order_matches")
+  .insert({
+    siparis_id: siparisId,
+    e_invoice_id: eInvoiceId,
+    purchase_bill_id: purchaseBillId,
+    purchase_bill_no: purchaseBillNo || "Eşleşti",
+    invoice_total: purchaseBillTotal,
+    matched_amount: matchedAmount,
+    supplier_id: supplierId,
+  });
+
+if (matchInsertError) {
+  return NextResponse.json(
+    {
+      success: false,
+      step: "match_table_insert",
+      message:
+        "Paraşüt gider kaydı oluştu ama ara eşleştirme tablosuna kayıt atılamadı.",
+      error: matchInsertError.message,
+      purchaseBillId,
+      purchaseBillNo,
+    },
+    { status: 500 }
+  );
+}
 
     // 6) SUPABASE SİPARİŞ EŞLEŞTİR
     const { data: updatedOrder, error: updateError } = await supabase

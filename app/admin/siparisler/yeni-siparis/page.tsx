@@ -89,9 +89,12 @@ export default function SiparislerPage() {
   const [suggestions, setSuggestions] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
-    loadNextOrderNo();
     loadSuggestions();
   }, []);
+
+  useEffect(() => {
+    loadNextOrderNo();
+  }, [form.satisTuru]);
 
 async function loadNextOrderNo() {
   try {
@@ -102,10 +105,23 @@ async function loadNextOrderNo() {
     const data = await res.json();
     const rows = data?.rows || [];
 
+    const prefixMap: Record<string, string> = {
+      "Peşin": "P",
+      "Vadeli": "V",
+      "Kredi Kartı": "K",
+      "Havale": "H",
+      "Çek": "C",
+    };
+
+    const prefix = prefixMap[form.satisTuru] || "P";
+
     let maxNumber = 0;
 
     rows.forEach((row: any) => {
-      const raw = String(row.satisId || "").trim();
+      const raw = String(row.satisId || "").trim().toUpperCase();
+
+      if (!raw.startsWith(prefix + "-")) return;
+
       const match = raw.match(/(\d+)$/);
 
       if (!match) return;
@@ -121,16 +137,19 @@ async function loadNextOrderNo() {
 
     setForm((prev) => ({
       ...prev,
-      satisId: `P-${nextNumber}`,
-      satisTarihi: prev.satisTarihi || new Date().toISOString().slice(0, 10),
+      satisId: `${prefix}-${nextNumber}`,
+      satisTarihi:
+        prev.satisTarihi || new Date().toISOString().slice(0, 10),
     }));
   } catch {
     setForm((prev) => ({
       ...prev,
-      satisTarihi: prev.satisTarihi || new Date().toISOString().slice(0, 10),
+      satisTarihi:
+        prev.satisTarihi || new Date().toISOString().slice(0, 10),
     }));
   }
 }
+
   async function loadSuggestions() {
   const fromStorage: Record<string, string[]> = {};
 
@@ -382,7 +401,7 @@ className="sticky top-4 z-40 rounded-2xl bg-gradient-to-r from-[#00a884] to-[#00
               </Grid>
             </Panel>
 
-{form.satisTuru !== "Peşin" && (
+{form.satisTuru === "Vadeli" && (
   <Panel title="Vade ve Ödeme">
     <Grid>
       <Input label="Yapılan Ödeme" name="yapilanOdeme" type="number" value={form.yapilanOdeme} update={update} />

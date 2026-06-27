@@ -68,12 +68,32 @@ export default function FaturaKesPage() {
 
       setOrder(foundOrder || null);
 
+      const cachedContactsRaw = sessionStorage.getItem("parasut_contacts_cache");
+      const cachedContactsAt = Number(
+        sessionStorage.getItem("parasut_contacts_cache_at") || 0
+      );
+      const cacheAgeMs = Date.now() - cachedContactsAt;
+      const cacheIsFresh = cachedContactsRaw && cacheAgeMs < 1000 * 60 * 30;
+
+      if (cacheIsFresh) {
+        try {
+          const cachedContacts = JSON.parse(cachedContactsRaw);
+          if (Array.isArray(cachedContacts)) {
+            setContacts(cachedContacts);
+            return;
+          }
+        } catch {
+          sessionStorage.removeItem("parasut_contacts_cache");
+          sessionStorage.removeItem("parasut_contacts_cache_at");
+        }
+      }
+
       let contactsRes = await fetch("/api/admin/parasut/contacts", {
         cache: "no-store",
       });
 
       if (contactsRes.status === 429) {
-        await sleep(1600);
+        await sleep(2500);
         contactsRes = await fetch("/api/admin/parasut/contacts", {
           cache: "no-store",
         });
@@ -82,6 +102,22 @@ export default function FaturaKesPage() {
       const contactsData = await contactsRes.json().catch(() => null);
 
       if (!contactsRes.ok || !contactsData?.success) {
+        if (cachedContactsRaw) {
+          try {
+            const staleContacts = JSON.parse(cachedContactsRaw);
+            if (Array.isArray(staleContacts)) {
+              setContacts(staleContacts);
+              setContactError(
+                "Paraşüt cari kart servisi şu an çok sık çağrıldı. Geçici olarak kayıtlı cari kart listesi kullanılıyor."
+              );
+              return;
+            }
+          } catch {
+            sessionStorage.removeItem("parasut_contacts_cache");
+            sessionStorage.removeItem("parasut_contacts_cache_at");
+          }
+        }
+
         setContactError(
           contactsRes.status === 429
             ? "Paraşüt cari kart servisi çok sık çağrıldı. Biraz bekleyip tekrar yenile."
@@ -98,7 +134,11 @@ export default function FaturaKesPage() {
         contactsData.rows ||
         [];
 
-      setContacts(Array.isArray(rawContacts) ? rawContacts : []);
+      const list = Array.isArray(rawContacts) ? rawContacts : [];
+
+      setContacts(list);
+      sessionStorage.setItem("parasut_contacts_cache", JSON.stringify(list));
+      sessionStorage.setItem("parasut_contacts_cache_at", String(Date.now()));
     } catch (err: any) {
       alert(err?.message || "Veriler alınamadı.");
     } finally {
@@ -210,7 +250,6 @@ const selectedCustomer = contacts.find(
   (c) => String(c.id) === String(selectedCustomerId)
 );
 
-console.log("SELECTED CUSTOMER", selectedCustomer);
 
   const bestMatch = useMemo(() => {
     if (!order || contacts.length === 0) return null;

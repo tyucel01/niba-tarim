@@ -12,6 +12,9 @@ const urunler = [
   "Granül Amonyum Sülfat",
   "15.15.15",
   "DAP",
+  "MAP",
+  "Çinkolu 15.15.15",
+  "Prill Üre",  
 ];
 
 const teslimSekilleri = ["Hariç", "Dahil"];

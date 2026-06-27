@@ -394,12 +394,22 @@ async function loadInvoicePreview(invoice: any) {
     (c) => String(c.id) === String(selectedSupplierId)
   );
 
-  // Cari kart tahmini sadece öneri amaçlıdır.
-  // Fatura listesini seçili/tahmini cariye göre daraltmıyoruz.
-  // Böylece kullanıcı tüm gelen e-faturalar arasından doğru faturayı seçebilir.
-const filteredInvoices = purchaseInvoices.filter(
-  (invoice) => getInvoiceTotal(invoice) >= 100000
-);
+  
+code app/admin/siparisler/\[id\]/page.tsxconst filteredInvoices = selectedContact
+    ? purchaseInvoices.filter((invoice) => {
+        const invoiceSupplier = normalizeText(getInvoiceSupplierName(invoice));
+        const invoiceTaxNo = getInvoiceSupplierTaxNo(invoice);
+        const contactName = normalizeText(getContactName(selectedContact));
+        const contactTaxNo = getContactTaxNo(selectedContact);
+
+        return (
+          (invoiceTaxNo && contactTaxNo && invoiceTaxNo === contactTaxNo) ||
+          (invoiceSupplier && contactName && invoiceSupplier.includes(contactName)) ||
+          (invoiceSupplier && contactName && contactName.includes(invoiceSupplier))
+        );
+      })
+    : [];
+
   if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#eef1ea]">
@@ -505,7 +515,7 @@ const filteredInvoices = purchaseInvoices.filter(
               </div>
             </Card>
 
-            <Card title="Gelen E-Faturalar" subtitle="Tüm gelen e-faturalar listelenir. Cari kart tahmini sadece öneridir.">
+            <Card title="Gelen E-Faturalar" subtitle="Seçili tedarikçi cari kartına ait gelen e-faturaları gösterir">
               {siparis.matched_purchase_invoice_no && (
                 <div className="mb-4 rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-100">
                   <p className="text-xs font-black uppercase tracking-wide text-emerald-700">
@@ -522,8 +532,10 @@ const filteredInvoices = purchaseInvoices.filter(
 
               {loadingInvoices ? (
                 <EmptyBox text="Faturalar yükleniyor..." />
+              ) : !selectedContact ? (
+                <EmptyBox text="Önce tedarikçi cari kart seç." />
               ) : filteredInvoices.length === 0 ? (
-                <EmptyBox text="Gelen e-fatura bulunamadı." />
+                <EmptyBox text="Seçili cariye ait gelen e-fatura bulunamadı." />
               ) : (
                 <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
                   {filteredInvoices.slice(0, 30).map((invoice) => {

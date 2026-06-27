@@ -243,17 +243,6 @@ function buildSalesInvoicePayload({
     safeTonUnitPrice = safeTonUnitPrice / 10;
   }
 
-  const fallbackQuantity =
-    toNumber(order.teslimOlanTonaj) || toNumber(order.siparisTonaj) || 1;
-
-  const quantity = toNumber(firstDetail.quantity) || fallbackQuantity;
-
-  const unit =
-    clean(firstDetail.unit) ||
-    clean(firstDetail.unit_name) ||
-    clean(firstDetail.measurement_unit) ||
-    "kg";
-
   const realProductName =
     clean(firstDetail.product_name) ||
     clean(firstDetail.description) ||
@@ -266,10 +255,45 @@ function buildSalesInvoicePayload({
       ? toNumber(firstDetail.vat_rate)
       : 0;
 
+  // Gelen alış faturasında miktar/birim neyse satış faturasında da onu baz al.
+  const invoiceQuantity = toNumber(
+    firstDetail.quantity || firstDetail.amount || firstDetail.qty || 0
+  );
+
+  const invoiceUnit =
+    clean(firstDetail.unit) ||
+    clean(firstDetail.unit_name) ||
+    clean(firstDetail.unitName) ||
+    clean(firstDetail.unit_type) ||
+    clean(firstDetail.unitType) ||
+    "kg";
+
+  const quantity = invoiceQuantity || siparisTonaj || 1;
+  const unit = invoiceUnit;
+
+  const normalizedUnit = unit.toLocaleLowerCase("tr-TR");
+
+  // Satış birim fiyatı alış faturasından değil, siparişteki satış fiyatından gelir.
+  // Alış faturası kg geldiyse ton fiyatını kg fiyatına çevirir.
   const unitPrice =
-    unit.toLowerCase() === "kg"
+    normalizedUnit.includes("kg") || normalizedUnit.includes("kilogram")
       ? safeTonUnitPrice / 1000
       : safeTonUnitPrice;
+  console.log(
+    "PARASUT_SALES_INVOICE_LINE_PREVIEW",
+    JSON.stringify(
+      {
+        firstDetail,
+        quantity,
+        unit,
+        unitPrice,
+        vatRate,
+        realProductName,
+      },
+      null,
+      2
+    )
+  );
 
   const firstProductId =
     firstDetail?.product_id ||
