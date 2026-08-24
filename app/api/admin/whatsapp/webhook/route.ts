@@ -127,6 +127,10 @@ export async function POST(req: Request) {
 
       for (const change of changes) {
         const value = change?.value || {};
+        console.log(
+  "WHATSAPP VALUE:",
+  JSON.stringify(value, null, 2)
+);
 
         const messages =
           value?.messages || [];
