@@ -256,6 +256,61 @@ export async function POST(req: Request) {
             name ||
             "WhatsApp Kişisi";
 
+          // Mesaj atan kişinin kayıtlı olduğu Niba WhatsApp gruplarını bul
+          const {
+            data: groupMemberships,
+            error: groupMembershipsError,
+          } = await supabase
+            .from("whatsapp_group_members")
+            .select("group_id")
+            .eq("contact_id", contactId);
+
+          if (groupMembershipsError) {
+            console.error(
+              "WhatsApp group memberships read error:",
+              groupMembershipsError
+            );
+          }
+
+          const groupIds =
+            groupMemberships
+              ?.map((item: any) => item.group_id)
+              .filter(Boolean) || [];
+
+          let groupNames: string[] = [];
+
+          if (groupIds.length > 0) {
+            const {
+              data: groups,
+              error: groupsError,
+            } = await supabase
+              .from("whatsapp_groups")
+              .select("id, name")
+              .in("id", groupIds);
+
+            if (groupsError) {
+              console.error(
+                "WhatsApp groups read error:",
+                groupsError
+              );
+            }
+
+            groupNames =
+              groups
+                ?.map((group: any) => group.name)
+                .filter(Boolean) || [];
+          }
+
+          const groupsText =
+            groupNames.length > 0
+              ? groupNames
+                  .map(
+                    (groupName) =>
+                      `• ${escapeHtml(groupName)}`
+                  )
+                  .join("\n")
+              : "Kayıtlı grup yok";
+
           if (!conversationId) {
             const {
               data: newConversation,
@@ -497,6 +552,7 @@ export async function POST(req: Request) {
                   `📱 ${escapeHtml(
                     phone
                   )}\n\n` +
+                  `👥 <b>Gruplar:</b>\n${groupsText}\n\n` +
                   `💬 ${escapeHtml(
                     messageText
                   )}\n\n` +
