@@ -23,17 +23,35 @@ type PreviewContact = {
   note: string;
 };
 
+function normalizeExcelKey(value: string) {
+  return String(value)
+    .trim()
+    .toLocaleLowerCase("tr-TR")
+    .replace(/ı/g, "i")
+    .replace(/ş/g, "s")
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/[^a-z0-9]/g, "");
+}
+
 function getCell(row: any, possibleKeys: string[]) {
   const rowKeys = Object.keys(row);
 
   for (const key of possibleKeys) {
+    const normalizedKey = normalizeExcelKey(key);
+
     const foundKey = rowKeys.find(
-      (rowKey) =>
-        rowKey.toString().trim().toLocaleLowerCase("tr-TR") ===
-        key.toString().trim().toLocaleLowerCase("tr-TR")
+      (rowKey) => normalizeExcelKey(rowKey) === normalizedKey
     );
 
-    if (foundKey && row[foundKey] !== undefined && row[foundKey] !== null) {
+    if (
+      foundKey &&
+      row[foundKey] !== undefined &&
+      row[foundKey] !== null &&
+      String(row[foundKey]).trim() !== ""
+    ) {
       return String(row[foundKey]).trim();
     }
   }
@@ -135,6 +153,15 @@ export default function Page() {
             "Ünvan",
             "unvan",
             "Unvan",
+            "full name",
+            "fullname",
+            "isim soyisim",
+            "isim soyad",
+            "ad soyisim",
+            "adi soyadi",
+            "musteri adi",
+            "firma unvani",
+            "firma ünvanı",
           ]);
 
           const phone = getCell(row, [

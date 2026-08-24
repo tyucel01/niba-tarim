@@ -21,6 +21,10 @@ export type PaymentMethod =
   | "cheque"
   | "payment_link";
 
+export type CollectionChannel =
+  | "admin_charge"
+  | "payment_link";
+
 export type AgricultureBank =
   | "denizbank"
   | "isbank"
@@ -38,10 +42,13 @@ export type AgricultureProductType =
 
 export type CreatePaymentInput = {
   providerCode?: PaymentProviderCode;
+
   orderId?: string | null;
   linkedOrderId?: string | null;
+
   paymentPurpose?: PaymentPurpose;
   paymentMethod?: PaymentMethod;
+  collectionChannel?: CollectionChannel;
 
   customerName?: string | null;
   customerEmail?: string | null;
@@ -63,6 +70,7 @@ export type CreatePaymentInput = {
   invoiceNo?: string | null;
   salesmanNo?: string | null;
   note?: string | null;
+  createdBy?: string | null;
 };
 
 export type PaymentResult = {

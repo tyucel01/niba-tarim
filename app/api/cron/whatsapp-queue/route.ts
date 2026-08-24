@@ -31,21 +31,70 @@ async function updateCampaign(campaignId: string) {
     .select("*", { count: "exact", head: true })
     .eq("campaign_id", campaignId);
 
+  const { data: campaign, error: campaignError } = await supabase
+    .from("whatsapp_campaigns")
+    .select("id, group_id, status, finished_at")
+    .eq("id", campaignId)
+    .maybeSingle();
+
+  if (campaignError) {
+    throw new Error(campaignError.message);
+  }
+
+  let groupName: string | null = null;
+
+  if (campaign?.group_id) {
+    const { data: group, error: groupError } = await supabase
+      .from("whatsapp_groups")
+      .select("name")
+      .eq("id", campaign.group_id)
+      .maybeSingle();
+
+    if (groupError) {
+      throw new Error(groupError.message);
+    }
+
+    groupName = group?.name || null;
+  }
+
   const success = successCount || 0;
   const fail = failCount || 0;
   const total = totalCount || 0;
   const done = success + fail;
 
-  await supabase
+  const isCompleted = total > 0 && done >= total;
+  const wasCompleted = campaign?.status === "completed";
+  const justCompleted = isCompleted && !wasCompleted;
+
+  const finishedAt = justCompleted
+    ? new Date().toISOString()
+    : campaign?.finished_at || null;
+
+  const { error: updateError } = await supabase
     .from("whatsapp_campaigns")
     .update({
       success_count: success,
       fail_count: fail,
       total_count: total,
-      status: total > 0 && done >= total ? "completed" : "processing",
-      finished_at: total > 0 && done >= total ? new Date().toISOString() : null,
+      status: isCompleted ? "completed" : "processing",
+      finished_at: isCompleted ? finishedAt : null,
     })
     .eq("id", campaignId);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  return {
+    id: campaignId,
+    group_id: campaign?.group_id || null,
+    group_name: groupName,
+    success,
+    failed: fail,
+    total,
+    justCompleted,
+    finished_at: finishedAt,
+  };
 }
 
 async function resetStuckProcessing() {
@@ -176,7 +225,15 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
 
     if (searchParams.get("secret") !== process.env.CRON_SECRET) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Unauthorized",
+        },
+        {
+          status: 401,
+        },
+      );
     }
 
     await resetStuckProcessing();
@@ -190,7 +247,15 @@ export async function GET(req: Request) {
       .limit(BATCH_SIZE);
 
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: error.message,
+        },
+        {
+          status: 500,
+        },
+      );
     }
 
     if (!pendingJobs || pendingJobs.length === 0) {
@@ -199,6 +264,7 @@ export async function GET(req: Request) {
         processed: 0,
         sent: 0,
         failed: 0,
+        completed_campaigns: [],
       });
     }
 
@@ -244,8 +310,11 @@ export async function GET(req: Request) {
 
         sent++;
       } catch (err) {
-        const attempt = (job?.attempt_count || pendingJob.attempt_count || 0) + 1;
-        const errorMessage = err instanceof Error ? err.message : String(err);
+        const attempt =
+          (job?.attempt_count || pendingJob.attempt_count || 0) + 1;
+
+        const errorMessage =
+          err instanceof Error ? err.message : String(err);
 
         await supabase
           .from("whatsapp_message_queue")
@@ -258,15 +327,39 @@ export async function GET(req: Request) {
           .eq("id", job?.id || pendingJob.id);
 
         if (job?.campaign_id || pendingJob.campaign_id) {
-          touchedCampaigns.add(job?.campaign_id || pendingJob.campaign_id);
+          touchedCampaigns.add(
+            job?.campaign_id || pendingJob.campaign_id,
+          );
         }
 
         failed++;
       }
     }
 
+    const completedCampaigns: Array<{
+      id: string;
+      group_id: string | null;
+      group_name: string | null;
+      success: number;
+      failed: number;
+      total: number;
+      finished_at: string | null;
+    }> = [];
+
     for (const campaignId of touchedCampaigns) {
-      await updateCampaign(campaignId);
+      const campaignResult = await updateCampaign(campaignId);
+
+      if (campaignResult.justCompleted) {
+        completedCampaigns.push({
+          id: campaignResult.id,
+          group_id: campaignResult.group_id,
+          group_name: campaignResult.group_name,
+          success: campaignResult.success,
+          failed: campaignResult.failed,
+          total: campaignResult.total,
+          finished_at: campaignResult.finished_at,
+        });
+      }
     }
 
     return NextResponse.json({
@@ -276,6 +369,7 @@ export async function GET(req: Request) {
       sent,
       failed,
       skipped,
+      completed_campaigns: completedCampaigns,
     });
   } catch (err) {
     return NextResponse.json(
@@ -283,7 +377,9 @@ export async function GET(req: Request) {
         ok: false,
         error: err instanceof Error ? err.message : String(err),
       },
-      { status: 500 },
+      {
+        status: 500,
+      },
     );
   }
 }

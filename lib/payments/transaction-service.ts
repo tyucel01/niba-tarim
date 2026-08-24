@@ -18,6 +18,8 @@ export class PaymentTransactionService {
 
         payment_purpose: purpose,
         payment_method: input.paymentMethod || "tarim_card",
+        collection_channel: input.collectionChannel || "admin_charge",
+created_by: input.createdBy || null,
 
         customer_name: input.customerName || null,
         amount: input.amount,
