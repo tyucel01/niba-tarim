@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-import {
-  createTelegramForumTopic,
-  sendTelegramMessage,
-} from "@/lib/telegram";
-
 export const dynamic = "force-dynamic";
 
 const supabase = createClient(
@@ -13,604 +8,349 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-function escapeHtml(value: string) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function parseWhatsAppMessage(message: any) {
-  const type = message?.type || "unknown";
-
-  if (type === "text") {
-    return message.text?.body || "";
-  }
-
-  if (type === "reaction") {
-    return message.reaction?.emoji || "👍";
-  }
-
-  if (type === "button") {
-    return message.button?.text || "[buton cevabı]";
-  }
-
-  if (type === "interactive") {
-    return (
-      message.interactive?.button_reply?.title ||
-      message.interactive?.list_reply?.title ||
-      "[interaktif cevap]"
-    );
-  }
-
-  if (type === "image") {
-    return message.image?.caption
-      ? `🖼️ Görsel: ${message.image.caption}`
-      : "🖼️ Görsel gönderildi";
-  }
-
-  if (type === "video") {
-    return message.video?.caption
-      ? `🎥 Video: ${message.video.caption}`
-      : "🎥 Video gönderildi";
-  }
-
-  if (type === "audio") {
-    return "🎧 Sesli mesaj gönderildi";
-  }
-
-  if (type === "voice") {
-    return "🎙️ Sesli mesaj gönderildi";
-  }
-
-  if (type === "document") {
-    return message.document?.filename
-      ? `📎 Belge: ${message.document.filename}`
-      : "📎 Belge gönderildi";
-  }
-
-  if (type === "sticker") {
-    return "🧩 Sticker gönderildi";
-  }
-
-  if (type === "location") {
-    return "📍 Konum gönderildi";
-  }
-
-  if (type === "contacts") {
-    return "👤 Kişi kartı gönderildi";
-  }
-
-  return `[${type} mesaj]`;
-}
-
-/*
-|--------------------------------------------------------------------------
-| Meta webhook verification
-|--------------------------------------------------------------------------
-*/
-
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-
-  const mode = searchParams.get("hub.mode");
-  const token = searchParams.get("hub.verify_token");
-  const challenge = searchParams.get("hub.challenge");
-
-  const verifyToken =
-    process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
-
-  if (
-    mode === "subscribe" &&
-    token === verifyToken
-  ) {
-    return new Response(
-      challenge || "",
-      { status: 200 }
-    );
-  }
-
-  return new Response(
-    "Forbidden",
-    { status: 403 }
-  );
-}
-
-/*
-|--------------------------------------------------------------------------
-| Incoming WhatsApp messages
-|--------------------------------------------------------------------------
-*/
-
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-
-    const entries = body?.entry || [];
-
-    for (const entry of entries) {
-      const changes = entry?.changes || [];
-
-      for (const change of changes) {
-        const value = change?.value || {};
-
-        const messages =
-          value?.messages || [];
-
-        const contacts =
-          value?.contacts || [];
-
-        for (const message of messages) {
-          const phone =
-            message?.from;
-
-          if (!phone) {
-            continue;
-          }
-
-          /*
-          |--------------------------------------------------------------------------
-          | Contact information
-          |--------------------------------------------------------------------------
-          */
-
-          const contactProfile =
-            contacts.find(
-              (contact: any) =>
-                contact?.wa_id === phone
-            );
-
-          const name =
-            contactProfile?.profile?.name ||
-            null;
-
-          const messageText =
-            parseWhatsAppMessage(message);
-
-          const messageType =
-            message?.type || "unknown";
-
-          /*
-          |--------------------------------------------------------------------------
-          | Find/create WhatsApp contact
-          |--------------------------------------------------------------------------
-          */
-
-          const {
-            data: existingContact,
-            error: contactReadError,
-          } = await supabase
-            .from("whatsapp_contacts")
-            .select("id, name")
-            .eq("phone", phone)
-            .maybeSingle();
-
-          if (contactReadError) {
-            console.error(
-              "WhatsApp contact read error:",
-              contactReadError
-            );
-          }
-
-          let contactId =
-            existingContact?.id || null;
-
-          if (!contactId) {
-            const {
-              data: newContact,
-              error: contactCreateError,
-            } = await supabase
-              .from("whatsapp_contacts")
-              .insert([
-                {
-                  name:
-                    name ||
-                    "WhatsApp Kişisi",
-
-                  phone,
-
-                  note:
-                    "WhatsApp cevabından otomatik oluştu",
-                },
-              ])
-              .select("id")
-              .single();
-
-            if (contactCreateError) {
-              console.error(
-                "WhatsApp contact create error:",
-                contactCreateError
-              );
-            }
-
-            contactId =
-              newContact?.id || null;
-          }
-
-          /*
-          |--------------------------------------------------------------------------
-          | Find/create conversation
-          |--------------------------------------------------------------------------
-          */
-
-          const {
-            data: existingConversation,
-            error: conversationReadError,
-          } = await supabase
-            .from("whatsapp_conversations")
-            .select(
-              "id, unread_count"
-            )
-            .eq("phone", phone)
-            .maybeSingle();
-
-          if (conversationReadError) {
-            console.error(
-              "WhatsApp conversation read error:",
-              conversationReadError
-            );
-          }
-
-          let conversationId =
-            existingConversation?.id ||
-            null;
-
-          const unreadCount =
-            existingConversation?.unread_count ||
-            0;
-
-          const displayName =
-            existingContact?.name ||
-            name ||
-            "WhatsApp Kişisi";
-
-          if (!conversationId) {
-            const {
-              data: newConversation,
-              error:
-                conversationCreateError,
-            } = await supabase
-              .from(
-                "whatsapp_conversations"
-              )
-              .insert([
-                {
-                  contact_id:
-                    contactId,
-
-                  phone,
-
-                  name:
-                    displayName,
-
-                  status:
-                    "waiting",
-
-                  archived:
-                    false,
-
-                  last_message:
-                    messageText,
-
-                  last_message_at:
-                    new Date().toISOString(),
-
-                  unread_count:
-                    1,
-                },
-              ])
-              .select("id")
-              .single();
-
-            if (
-              conversationCreateError
-            ) {
-              console.error(
-                "WhatsApp conversation create error:",
-                conversationCreateError
-              );
-            }
-
-            conversationId =
-              newConversation?.id ||
-              null;
-          } else {
-            const {
-              error:
-                conversationUpdateError,
-            } = await supabase
-              .from(
-                "whatsapp_conversations"
-              )
-              .update({
-                contact_id:
-                  contactId,
-
-                name:
-                  displayName,
-
-                status:
-                  "waiting",
-
-                archived:
-                  false,
-
-                last_message:
-                  messageText,
-
-                last_message_at:
-                  new Date().toISOString(),
-
-                unread_count:
-                  unreadCount + 1,
-              })
-              .eq(
-                "id",
-                conversationId
-              );
-
-            if (
-              conversationUpdateError
-            ) {
-              console.error(
-                "WhatsApp conversation update error:",
-                conversationUpdateError
-              );
-            }
-          }
-
-          if (!conversationId) {
-            console.error(
-              "WhatsApp conversation oluşturulamadı:",
-              phone
-            );
-
-            continue;
-          }
-
-          /*
-          |--------------------------------------------------------------------------
-          | Save incoming message
-          |--------------------------------------------------------------------------
-          */
-
-          const {
-            error: messageInsertError,
-          } = await supabase
-            .from(
-              "whatsapp_conversation_messages"
-            )
-            .insert([
-              {
-                conversation_id:
-                  conversationId,
-
-                contact_id:
-                  contactId,
-
-                phone,
-
-                direction:
-                  "inbound",
-
-                message_type:
-                  messageType,
-
-                message_text:
-                  messageText,
-
-                raw_payload:
-                  message,
-              },
-            ]);
-
-          if (messageInsertError) {
-            console.error(
-              "WhatsApp message insert error:",
-              messageInsertError
-            );
-          }
-
-          /*
-          |--------------------------------------------------------------------------
-          | Telegram Topic
-          |--------------------------------------------------------------------------
-          */
-
-          try {
-            /*
-             * Aynı WhatsApp conversation için daha önce
-             * Telegram topic oluşturulmuş mu?
-             */
-
-            const {
-              data:
-                existingTelegramMapping,
-              error:
-                existingTelegramMappingError,
-            } = await supabase
-              .from(
-                "whatsapp_telegram_messages"
-              )
-              .select(
-                "telegram_thread_id"
-              )
-              .eq(
-                "conversation_id",
-                conversationId
-              )
-              .not(
-                "telegram_thread_id",
-                "is",
-                null
-              )
-              .limit(1)
-              .maybeSingle();
-
-            if (
-              existingTelegramMappingError
-            ) {
-              console.error(
-                "Telegram thread lookup error:",
-                existingTelegramMappingError
-              );
-            }
-
-            let telegramThreadId:
-              | number
-              | null = null;
-
-            if (
-              existingTelegramMapping?.telegram_thread_id
-            ) {
-              telegramThreadId =
-                Number(
-                  existingTelegramMapping.telegram_thread_id
-                );
-            }
-
-            /*
-             * İlk WhatsApp mesajıysa yeni Telegram topic aç.
-             */
-
-            if (!telegramThreadId) {
-              const topic =
-                await createTelegramForumTopic({
-                  name:
-                    `${displayName} • ${phone}`,
-                });
-
-              telegramThreadId =
-                Number(
-                  topic.message_thread_id
-                );
-
-              if (
-                !telegramThreadId ||
-                Number.isNaN(
-                  telegramThreadId
-                )
-              ) {
-                throw new Error(
-                  "Telegram topic oluşturuldu fakat message_thread_id alınamadı."
-                );
-              }
-            }
-
-            /*
-             * WhatsApp mesajını o kişinin topic'ine gönder.
-             */
-
-            const telegramMessage =
-              await sendTelegramMessage({
-                messageThreadId:
-                  telegramThreadId,
-
-                text:
-                  `🟢 <b>NIBA WHATSAPP</b>\n\n` +
-                  `👤 <b>${escapeHtml(
-                    displayName
-                  )}</b>\n` +
-                  `📱 ${escapeHtml(
-                    phone
-                  )}\n\n` +
-                  `💬 ${escapeHtml(
-                    messageText
-                  )}\n\n` +
-                  `↩️ <i>Bu konuya mesaj yazarak WhatsApp'tan cevap verebilirsiniz.</i>`,
-              });
-
-            /*
-             * Telegram mesajı ile WhatsApp conversation
-             * arasındaki mapping'i kaydet.
-             */
-
-            const {
-              error:
-                telegramMappingInsertError,
-            } = await supabase
-              .from(
-                "whatsapp_telegram_messages"
-              )
-              .insert([
-                {
-                  whatsapp_phone:
-                    phone,
-
-                  whatsapp_name:
-                    displayName,
-
-                  whatsapp_message_id:
-                    message?.id ||
-                    null,
-
-                  telegram_chat_id:
-                    String(
-                      telegramMessage
-                        ?.chat
-                        ?.id
-                    ),
-
-                  telegram_message_id:
-                    telegramMessage
-                      ?.message_id,
-
-                  telegram_thread_id:
-                    telegramThreadId,
-
-                  conversation_id:
-                    conversationId,
-
-                  direction:
-                    "incoming",
-                },
-              ]);
-
-            if (
-              telegramMappingInsertError
-            ) {
-              console.error(
-                "Telegram mapping insert error:",
-                telegramMappingInsertError
-              );
-            }
-          } catch (
-            telegramError
-          ) {
-            /*
-             * Telegram problemi WhatsApp webhook'unu
-             * tamamen düşürmesin.
-             */
-            console.error(
-              "Telegram bildirim hatası:",
-              telegramError
-            );
-          }
-        }
-      }
+    // Telegram webhook güvenliği
+    const receivedSecret = req.headers.get(
+      "x-telegram-bot-api-secret-token"
+    );
+
+    const expectedSecret =
+      process.env.TELEGRAM_WEBHOOK_SECRET;
+
+    if (
+      expectedSecret &&
+      receivedSecret !== expectedSecret
+    ) {
+      return NextResponse.json(
+        { ok: false, error: "Unauthorized" },
+        { status: 401 }
+      );
     }
 
+    const body = await req.json();
+    const message = body?.message;
+
+    if (!message) {
+      return NextResponse.json({ ok: true });
+    }
+
+    const chatId = String(
+      message?.chat?.id || ""
+    );
+
+    const allowedChatId = String(
+      process.env.TELEGRAM_CHAT_ID || ""
+    );
+
+    // Sadece Niba Telegram grubundan kabul et
+    if (
+      !chatId ||
+      !allowedChatId ||
+      chatId !== allowedChatId
+    ) {
+      return NextResponse.json({ ok: true });
+    }
+
+    // Bot mesajlarını tekrar işleme
+    if (message?.from?.is_bot) {
+      return NextResponse.json({ ok: true });
+    }
+
+    const text =
+      message?.text?.trim();
+
+    if (!text) {
+      return NextResponse.json({ ok: true });
+    }
+
+    const replyToMessageId =
+      message?.reply_to_message?.message_id;
+
+    const messageThreadId =
+      message?.message_thread_id;
+
+    // General içine normal mesaj yazılırsa işlem yapma.
+    // Ya bot mesajına Reply olacak ya da bir Topic içinde olacak.
+    if (
+      !replyToMessageId &&
+      !messageThreadId
+    ) {
+      return NextResponse.json({ ok: true });
+    }
+
+    let mapping: any = null;
+    let mappingError: any = null;
+
+    // 1) Eski Reply yöntemi
+    if (replyToMessageId) {
+      const result = await supabase
+        .from("whatsapp_telegram_messages")
+        .select(
+          "conversation_id, whatsapp_phone, whatsapp_name, telegram_thread_id"
+        )
+        .eq(
+          "telegram_chat_id",
+          chatId
+        )
+        .eq(
+          "telegram_message_id",
+          replyToMessageId
+        )
+        .maybeSingle();
+
+      mapping = result.data;
+      mappingError = result.error;
+    }
+
+    // 2) Topic içinden direkt mesaj
+    if (
+      !mapping &&
+      messageThreadId
+    ) {
+      const result = await supabase
+        .from("whatsapp_telegram_messages")
+        .select(
+          "conversation_id, whatsapp_phone, whatsapp_name, telegram_thread_id"
+        )
+        .eq(
+          "telegram_chat_id",
+          chatId
+        )
+        .eq(
+          "telegram_thread_id",
+          messageThreadId
+        )
+        .order(
+          "created_at",
+          { ascending: false }
+        )
+        .limit(1)
+        .maybeSingle();
+
+      mapping = result.data;
+      mappingError = result.error;
+    }
+
+    if (mappingError) {
+      console.error(
+        "Telegram mapping error:",
+        mappingError
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Telegram mesaj eşleşmesi okunamadı.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!mapping) {
+      console.log(
+        "Telegram mapping bulunamadı:",
+        {
+          replyToMessageId,
+          messageThreadId,
+        }
+      );
+
+      return NextResponse.json({
+        ok: true,
+      });
+    }
+
+    if (
+      !mapping.conversation_id ||
+      !mapping.whatsapp_phone
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "conversation_id veya telefon eksik.",
+        },
+        { status: 500 }
+      );
+    }
+
+    const token =
+      process.env.WHATSAPP_TOKEN;
+
+    const phoneNumberId =
+      process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+    const apiVersion =
+      process.env.WHATSAPP_API_VERSION ||
+      "v23.0";
+
+    if (
+      !token ||
+      !phoneNumberId
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "WhatsApp API ayarları eksik.",
+        },
+        { status: 500 }
+      );
+    }
+
+    // WhatsApp'a gönder
+    const response = await fetch(
+      `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          Authorization:
+            `Bearer ${token}`,
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product:
+            "whatsapp",
+          to:
+            mapping.whatsapp_phone,
+          type:
+            "text",
+          text: {
+            preview_url: false,
+            body: text,
+          },
+        }),
+      }
+    );
+
+    const data =
+      await response.json();
+
+    if (!response.ok) {
+      console.error(
+        "Telegram -> WhatsApp error:",
+        JSON.stringify(data)
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: data,
+        },
+        {
+          status: response.status,
+        }
+      );
+    }
+
+    // Panel konuşmasına outbound olarak kaydet
+    await supabase
+      .from(
+        "whatsapp_conversation_messages"
+      )
+      .insert([
+        {
+          conversation_id:
+            mapping.conversation_id,
+
+          phone:
+            mapping.whatsapp_phone,
+
+          direction:
+            "outbound",
+
+          message_type:
+            "text",
+
+          message_text:
+            text,
+
+          raw_payload: {
+            source:
+              "telegram",
+
+            telegram_message_id:
+              message.message_id,
+
+            telegram_thread_id:
+              messageThreadId || null,
+
+            telegram_sender: {
+              id:
+                message?.from?.id ||
+                null,
+
+              first_name:
+                message?.from?.first_name ||
+                null,
+
+              last_name:
+                message?.from?.last_name ||
+                null,
+
+              username:
+                message?.from?.username ||
+                null,
+            },
+
+            whatsapp_response:
+              data,
+          },
+        },
+      ]);
+
+    // Conversation durumunu güncelle
+    await supabase
+      .from(
+        "whatsapp_conversations"
+      )
+      .update({
+        status:
+          "answered",
+
+        archived:
+          false,
+
+        last_message:
+          text,
+
+        last_message_at:
+          new Date().toISOString(),
+
+        unread_count:
+          0,
+      })
+      .eq(
+        "id",
+        mapping.conversation_id
+      );
+
     return NextResponse.json({
-      success: true,
+      ok: true,
+      sent: true,
+      conversationId:
+        mapping.conversation_id,
+      telegramThreadId:
+        messageThreadId || null,
     });
   } catch (error) {
     console.error(
-      "WhatsApp webhook error:",
+      "Telegram webhook error:",
       error
     );
 
     return NextResponse.json(
       {
-        success: false,
-
+        ok: false,
         error:
           error instanceof Error
             ? error.message
             : String(error),
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }
