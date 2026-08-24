@@ -480,13 +480,16 @@ export async function POST(req: Request) {
                 "conversation_id",
                 conversationId
               )
-              .not(
-                "telegram_thread_id",
-                "is",
-                null
-              )
-              .limit(1)
-              .maybeSingle();
+.not(
+  "telegram_thread_id",
+  "is",
+  null
+)
+.order("created_at", {
+  ascending: false,
+})
+.limit(1)
+.maybeSingle();
 
             if (
               existingTelegramMappingError
@@ -539,25 +542,53 @@ export async function POST(req: Request) {
 
             // WhatsApp mesajını kişinin topic'ine gönder.
 
-            const telegramMessage =
-              await sendTelegramMessage({
-                messageThreadId:
-                  telegramThreadId,
+const telegramText =
+  `🟢 <b>NIBA WHATSAPP</b>\n\n` +
+  `👤 <b>${escapeHtml(displayName)}</b>\n` +
+  `📱 ${escapeHtml(phone)}\n\n` +
+  `👥 <b>Gruplar:</b>\n${groupsText}\n\n` +
+  `💬 ${escapeHtml(messageText)}\n\n` +
+  `↩️ <i>Bu konuya mesaj yazarak WhatsApp'tan cevap verebilirsiniz.</i>`;
 
-                text:
-                  `🟢 <b>NIBA WHATSAPP</b>\n\n` +
-                  `👤 <b>${escapeHtml(
-                    displayName
-                  )}</b>\n` +
-                  `📱 ${escapeHtml(
-                    phone
-                  )}\n\n` +
-                  `👥 <b>Gruplar:</b>\n${groupsText}\n\n` +
-                  `💬 ${escapeHtml(
-                    messageText
-                  )}\n\n` +
-                  `↩️ <i>Bu konuya mesaj yazarak WhatsApp'tan cevap verebilirsiniz.</i>`,
-              });
+let telegramMessage;
+
+try {
+  // Önce mevcut topic'e göndermeyi dene
+  telegramMessage = await sendTelegramMessage({
+    messageThreadId: telegramThreadId,
+    text: telegramText,
+  });
+} catch (sendError) {
+  console.error(
+    "Mevcut Telegram topic kullanılamadı, yenisi oluşturuluyor:",
+    sendError
+  );
+
+  // Topic Telegram'dan silinmiş olabilir.
+  // Yeni topic oluştur.
+  const newTopic = await createTelegramForumTopic({
+    name: `${displayName} • ${phone}`,
+  });
+
+  telegramThreadId = Number(
+    newTopic.message_thread_id
+  );
+
+  if (
+    !telegramThreadId ||
+    Number.isNaN(telegramThreadId)
+  ) {
+    throw new Error(
+      "Yeni Telegram topic oluşturuldu fakat message_thread_id alınamadı."
+    );
+  }
+
+  // Yeni topic'e mesajı gönder
+  telegramMessage = await sendTelegramMessage({
+    messageThreadId: telegramThreadId,
+    text: telegramText,
+  });
+}
 
             // Telegram mesajı ile WhatsApp konuşmasını eşleştir.
 
