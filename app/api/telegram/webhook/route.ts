@@ -30,6 +30,11 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     const message = body?.message;
+    console.log("TELEGRAM CHAT INFO", {
+  id: message?.chat?.id,
+  title: message?.chat?.title,
+  type: message?.chat?.type,
+});
 
     // Mesaj değilse sorun yok
     if (!message) {
