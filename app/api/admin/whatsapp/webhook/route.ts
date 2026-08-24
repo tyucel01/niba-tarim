@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { sendTelegramMessage } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
 
@@ -7,6 +8,13 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+function escapeHtml(value: string) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
 
 function parseWhatsAppMessage(message: any) {
   const type = message?.type || "unknown";
@@ -177,19 +185,54 @@ export async function POST(req: Request) {
               .eq("id", conversationId);
           }
 
-          if (conversationId) {
-            await supabase.from("whatsapp_conversation_messages").insert([
-              {
-                conversation_id: conversationId,
-                contact_id: contactId,
-                phone,
-                direction: "inbound",
-                message_type: messageType,
-                message_text: messageText,
-                raw_payload: message,
-              },
-            ]);
-          }
+if (conversationId) {
+  await supabase.from("whatsapp_conversation_messages").insert([
+    {
+      conversation_id: conversationId,
+      contact_id: contactId,
+      phone,
+      direction: "inbound",
+      message_type: messageType,
+      message_text: messageText,
+      raw_payload: message,
+    },
+  ]);
+
+  try {
+    const displayName =
+      existingContact?.name ||
+      name ||
+      "WhatsApp Kişisi";
+
+    const telegramMessage = await sendTelegramMessage({
+      text:
+        `🟢 <b>NIBA WHATSAPP</b>\n\n` +
+        `👤 <b>${escapeHtml(displayName)}</b>\n` +
+        `📱 ${escapeHtml(phone)}\n\n` +
+        `💬 ${escapeHtml(messageText)}\n\n` +
+        `↩️ <i>Bu mesaja Reply yaparak WhatsApp'tan cevap verebilirsiniz.</i>`,
+    });
+
+    await supabase
+      .from("whatsapp_telegram_messages")
+      .insert([
+        {
+          whatsapp_phone: phone,
+          whatsapp_name: displayName,
+          whatsapp_message_id: message.id || null,
+          telegram_chat_id: String(telegramMessage.chat.id),
+          telegram_message_id: telegramMessage.message_id,
+          conversation_id: conversationId,
+          direction: "incoming",
+        },
+      ]);
+  } catch (telegramError) {
+    console.error(
+      "Telegram bildirim hatası:",
+      telegramError
+    );
+  }
+}
         }
       }
     }
