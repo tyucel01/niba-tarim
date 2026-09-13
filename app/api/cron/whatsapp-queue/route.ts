@@ -198,24 +198,12 @@ export async function GET(req: Request) {
 
     const resetError = await resetStuckProcessing();
 
-    if (resetError) {
-      const errorInfo = supabaseErrorDetails(resetError);
-
-      console.error(
-        "[WHATSAPP_QUEUE] reset_stuck_processing başarısız",
-        errorInfo,
-      );
-
-      return NextResponse.json(
-        {
-          ok: false,
-          stage: "reset_stuck_processing",
-          ...errorInfo,
-          duration_ms: Date.now() - startedAt,
-        },
-        { status: 500 },
-      );
-    }
+if (resetError) {
+  console.warn(
+    "[WHATSAPP_QUEUE] reset_stuck_processing geçici olarak başarısız",
+    supabaseErrorDetails(resetError),
+  );
+}
 
     const { data: pendingJobs, error } = await supabase
       .from("whatsapp_message_queue")
