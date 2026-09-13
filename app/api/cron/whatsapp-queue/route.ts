@@ -165,9 +165,26 @@ async function claimJob(jobId: string) {
     `)
     .maybeSingle();
 
-  if (error) {
-    throw new Error(error.message);
-  }
+if (error) {
+  console.error("[WHATSAPP_QUEUE] pending sorgusu başarısız", {
+    message: error.message,
+    code: error.code,
+    details: error.details,
+    hint: error.hint,
+  });
+
+  return NextResponse.json(
+    {
+      ok: false,
+      stage: "pending_jobs_query",
+      error: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    },
+    { status: 500 },
+  );
+}
 
   return data;
 }
@@ -278,8 +295,10 @@ export async function GET(req: Request) {
       failed,
       skipped,
     });
-  } catch (err) {
-    return NextResponse.json(
+} catch (err) {
+  console.error("[WHATSAPP_QUEUE] beklenmeyen hata", err);
+
+  return NextResponse.json(
       {
         ok: false,
         error: err instanceof Error ? err.message : String(err),
