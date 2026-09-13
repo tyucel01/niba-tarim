@@ -14,6 +14,15 @@ const MAX_RETRY = 3;
 const BATCH_SIZE = 15;
 const STUCK_MINUTES = 10;
 
+function supabaseErrorDetails(error: any) {
+  return {
+    message: error?.message || "Bilinmeyen Supabase hatası",
+    code: error?.code ?? null,
+    details: error?.details ?? null,
+    hint: error?.hint ?? null,
+  };
+}
+
 async function updateCampaign(campaignId: string) {
   const { count: successCount = 0 } = await supabase
     .from("whatsapp_message_queue")
@@ -54,7 +63,7 @@ async function resetStuckProcessing() {
     Date.now() - STUCK_MINUTES * 60 * 1000,
   ).toISOString();
 
-  await supabase
+  const { error } = await supabase
     .from("whatsapp_message_queue")
     .update({
       status: "pending",
@@ -62,6 +71,8 @@ async function resetStuckProcessing() {
     })
     .eq("status", "processing")
     .lt("processing_at", stuckDate);
+
+  return error;
 }
 
 async function sendTemplate({
@@ -173,14 +184,38 @@ async function claimJob(jobId: string) {
 }
 
 export async function GET(req: Request) {
+  const startedAt = Date.now();
+
   try {
     const { searchParams } = new URL(req.url);
 
     if (searchParams.get("secret") !== process.env.CRON_SECRET) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { ok: false, error: "Unauthorized" },
+        { status: 401 },
+      );
     }
 
-    await resetStuckProcessing();
+    const resetError = await resetStuckProcessing();
+
+    if (resetError) {
+      const errorInfo = supabaseErrorDetails(resetError);
+
+      console.error(
+        "[WHATSAPP_QUEUE] reset_stuck_processing başarısız",
+        errorInfo,
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+          stage: "reset_stuck_processing",
+          ...errorInfo,
+          duration_ms: Date.now() - startedAt,
+        },
+        { status: 500 },
+      );
+    }
 
     const { data: pendingJobs, error } = await supabase
       .from("whatsapp_message_queue")
@@ -191,7 +226,19 @@ export async function GET(req: Request) {
       .limit(BATCH_SIZE);
 
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+      const errorInfo = supabaseErrorDetails(error);
+
+      console.error("[WHATSAPP_QUEUE] pending_jobs_query başarısız", errorInfo);
+
+      return NextResponse.json(
+        {
+          ok: false,
+          stage: "pending_jobs_query",
+          ...errorInfo,
+          duration_ms: Date.now() - startedAt,
+        },
+        { status: 500 },
+      );
     }
 
     if (!pendingJobs || pendingJobs.length === 0) {
@@ -200,6 +247,7 @@ export async function GET(req: Request) {
         processed: 0,
         sent: 0,
         failed: 0,
+        duration_ms: Date.now() - startedAt,
       });
     }
 
@@ -245,8 +293,18 @@ export async function GET(req: Request) {
 
         sent++;
       } catch (err) {
-        const attempt = (job?.attempt_count || pendingJob.attempt_count || 0) + 1;
-        const errorMessage = err instanceof Error ? err.message : String(err);
+        const attempt =
+          (job?.attempt_count || pendingJob.attempt_count || 0) + 1;
+
+        const errorMessage =
+          err instanceof Error ? err.message : String(err);
+
+        console.error("[WHATSAPP_QUEUE] mesaj gönderimi başarısız", {
+          job_id: job?.id || pendingJob.id,
+          campaign_id: job?.campaign_id || pendingJob.campaign_id,
+          attempt,
+          error: errorMessage,
+        });
 
         await supabase
           .from("whatsapp_message_queue")
@@ -259,7 +317,9 @@ export async function GET(req: Request) {
           .eq("id", job?.id || pendingJob.id);
 
         if (job?.campaign_id || pendingJob.campaign_id) {
-          touchedCampaigns.add(job?.campaign_id || pendingJob.campaign_id);
+          touchedCampaigns.add(
+            job?.campaign_id || pendingJob.campaign_id,
+          );
         }
 
         failed++;
@@ -277,12 +337,20 @@ export async function GET(req: Request) {
       sent,
       failed,
       skipped,
+      duration_ms: Date.now() - startedAt,
     });
   } catch (err) {
+    const errorMessage =
+      err instanceof Error ? err.message : String(err);
+
+    console.error("[WHATSAPP_QUEUE] beklenmeyen hata", err);
+
     return NextResponse.json(
       {
         ok: false,
-        error: err instanceof Error ? err.message : String(err),
+        stage: "unexpected_error",
+        error: errorMessage,
+        duration_ms: Date.now() - startedAt,
       },
       { status: 500 },
     );
