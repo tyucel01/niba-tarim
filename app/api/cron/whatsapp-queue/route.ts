@@ -14,6 +14,12 @@ const MAX_RETRY = 3;
 const BATCH_SIZE = 15;
 const STUCK_MINUTES = 10;
 
+const QUERY_RETRY_COUNT = 3;
+const QUERY_RETRY_DELAY_MS = 1000;
+
+const wait = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
 function supabaseErrorDetails(error: any) {
   return {
     message: error?.message || "Bilinmeyen Supabase hatası",
@@ -53,7 +59,8 @@ async function updateCampaign(campaignId: string) {
       fail_count: fail,
       total_count: total,
       status: total > 0 && done >= total ? "completed" : "processing",
-      finished_at: total > 0 && done >= total ? new Date().toISOString() : null,
+      finished_at:
+        total > 0 && done >= total ? new Date().toISOString() : null,
     })
     .eq("id", campaignId);
 }
@@ -73,6 +80,47 @@ async function resetStuckProcessing() {
     .lt("processing_at", stuckDate);
 
   return error;
+}
+
+async function fetchPendingJobsWithRetry() {
+  let lastError: any = null;
+
+  for (let attempt = 1; attempt <= QUERY_RETRY_COUNT; attempt++) {
+    const { data, error } = await supabase
+      .from("whatsapp_message_queue")
+      .select("id, campaign_id, attempt_count, created_at")
+      .eq("status", "pending")
+      .order("created_at", { ascending: true })
+      .limit(BATCH_SIZE);
+
+    if (!error) {
+      return {
+        data,
+        error: null,
+        attempts: attempt,
+      };
+    }
+
+    lastError = error;
+
+    console.warn(
+      "[WHATSAPP_QUEUE] pending sorgusu tekrar denenecek",
+      {
+        attempt,
+        ...supabaseErrorDetails(error),
+      },
+    );
+
+    if (attempt < QUERY_RETRY_COUNT) {
+      await wait(QUERY_RETRY_DELAY_MS * attempt);
+    }
+  }
+
+  return {
+    data: null,
+    error: lastError,
+    attempts: QUERY_RETRY_COUNT,
+  };
 }
 
 async function sendTemplate({
@@ -122,7 +170,9 @@ async function sendTemplate({
 
   const templatePayload: any = {
     name: templateName,
-    language: { code: languageCode || "tr" },
+    language: {
+      code: languageCode || "tr",
+    },
   };
 
   if (components.length > 0) {
@@ -191,41 +241,53 @@ export async function GET(req: Request) {
 
     if (searchParams.get("secret") !== process.env.CRON_SECRET) {
       return NextResponse.json(
-        { ok: false, error: "Unauthorized" },
-        { status: 401 },
+        {
+          ok: false,
+          error: "Unauthorized",
+        },
+        {
+          status: 401,
+        },
       );
     }
 
     const resetError = await resetStuckProcessing();
 
-if (resetError) {
-  console.warn(
-    "[WHATSAPP_QUEUE] reset_stuck_processing geçici olarak başarısız",
-    supabaseErrorDetails(resetError),
-  );
-}
+    if (resetError) {
+      console.warn(
+        "[WHATSAPP_QUEUE] reset_stuck_processing geçici olarak başarısız",
+        supabaseErrorDetails(resetError),
+      );
+    }
 
-    const { data: pendingJobs, error } = await supabase
-      .from("whatsapp_message_queue")
-      .select("id, campaign_id, attempt_count, created_at")
-      .eq("status", "pending")
-      .or(`attempt_count.is.null,attempt_count.lt.${MAX_RETRY}`)
-      .order("created_at", { ascending: true })
-      .limit(BATCH_SIZE);
+    const {
+      data: pendingJobs,
+      error,
+      attempts: queryAttempts,
+    } = await fetchPendingJobsWithRetry();
 
     if (error) {
       const errorInfo = supabaseErrorDetails(error);
 
-      console.error("[WHATSAPP_QUEUE] pending_jobs_query başarısız", errorInfo);
+      console.error(
+        "[WHATSAPP_QUEUE] pending_jobs_query tüm denemelerde başarısız",
+        {
+          query_attempts: queryAttempts,
+          ...errorInfo,
+        },
+      );
 
       return NextResponse.json(
         {
           ok: false,
           stage: "pending_jobs_query",
+          query_attempts: queryAttempts,
           ...errorInfo,
           duration_ms: Date.now() - startedAt,
         },
-        { status: 500 },
+        {
+          status: 500,
+        },
       );
     }
 
@@ -235,6 +297,7 @@ if (resetError) {
         processed: 0,
         sent: 0,
         failed: 0,
+        query_attempts: queryAttempts,
         duration_ms: Date.now() - startedAt,
       });
     }
@@ -287,17 +350,22 @@ if (resetError) {
         const errorMessage =
           err instanceof Error ? err.message : String(err);
 
-        console.error("[WHATSAPP_QUEUE] mesaj gönderimi başarısız", {
-          job_id: job?.id || pendingJob.id,
-          campaign_id: job?.campaign_id || pendingJob.campaign_id,
-          attempt,
-          error: errorMessage,
-        });
+        console.error(
+          "[WHATSAPP_QUEUE] mesaj gönderimi başarısız",
+          {
+            job_id: job?.id || pendingJob.id,
+            campaign_id:
+              job?.campaign_id || pendingJob.campaign_id,
+            attempt,
+            error: errorMessage,
+          },
+        );
 
         await supabase
           .from("whatsapp_message_queue")
           .update({
-            status: attempt >= MAX_RETRY ? "failed" : "pending",
+            status:
+              attempt >= MAX_RETRY ? "failed" : "pending",
             attempt_count: attempt,
             processing_at: null,
             error: errorMessage,
@@ -325,13 +393,17 @@ if (resetError) {
       sent,
       failed,
       skipped,
+      query_attempts: queryAttempts,
       duration_ms: Date.now() - startedAt,
     });
   } catch (err) {
     const errorMessage =
       err instanceof Error ? err.message : String(err);
 
-    console.error("[WHATSAPP_QUEUE] beklenmeyen hata", err);
+    console.error(
+      "[WHATSAPP_QUEUE] beklenmeyen hata",
+      err,
+    );
 
     return NextResponse.json(
       {
@@ -340,7 +412,9 @@ if (resetError) {
         error: errorMessage,
         duration_ms: Date.now() - startedAt,
       },
-      { status: 500 },
+      {
+        status: 500,
+      },
     );
   }
 }
