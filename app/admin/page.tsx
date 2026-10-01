@@ -1,17 +1,10 @@
 "use client";
 
-import Link from "next/link";
+import Dashboard, { type DashboardStats } from "./dashboard";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 type Step = "login" | "otp" | "admin";
-
-type DashboardStats = {
-  orders: number;
-  users: number;
-  activeCampaigns: number;
-  pendingMessages: number;
-};
 
 export default function AdminPage() {
   const [loading, setLoading] = useState(true);
@@ -297,136 +290,5 @@ if (!userPhone) {
     );
   }
 
-  return (
-    <main className="min-h-screen bg-[#eef1ea] p-4 text-slate-900 md:p-6">
-      <div className="mx-auto max-w-7xl space-y-5">
-        <section className="overflow-hidden rounded-[32px] bg-slate-950 p-6 text-white shadow-2xl shadow-slate-900/10">
-          <div className="flex flex-col justify-between gap-5 md:flex-row md:items-center">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.28em] text-emerald-300">
-                Niba Tarım
-              </p>
-              <h1 className="mt-2 text-3xl font-black tracking-tight">
-                Admin Paneli
-              </h1>
-              <p className="mt-2 text-sm text-white/65">
-                Sipariş, kullanıcı ve WhatsApp operasyonlarını tek merkezden yönet.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={loadDashboardStats}
-                disabled={statsLoading}
-                className="rounded-2xl bg-white/10 px-4 py-3 text-xs font-black text-white ring-1 ring-white/15 disabled:opacity-50"
-              >
-                {statsLoading ? "Yenileniyor..." : "Yenile"}
-              </button>
-
-              <Link
-                href="/admin/profil"
-                prefetch={false}
-                className="rounded-2xl bg-white px-4 py-3 text-xs font-black text-slate-950"
-              >
-                Profil
-              </Link>
-
-              <button
-                type="button"
-                onClick={logout}
-                className="rounded-2xl bg-red-600 px-4 py-3 text-xs font-black text-white"
-              >
-                Çıkış
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatCard dark title="Siparişler" value={stats.orders} />
-            <StatCard dark title="Kullanıcılar" value={stats.users} />
-            <StatCard dark title="Aktif Kampanya" value={stats.activeCampaigns} />
-            <StatCard dark title="Bekleyen Mesaj" value={stats.pendingMessages} />
-          </div>
-
-          {lastUpdated && (
-            <p className="mt-4 text-xs font-semibold text-white/50">
-              Son güncelleme: {lastUpdated}
-            </p>
-          )}
-        </section>
-
-        <section className="grid gap-4 md:grid-cols-3">
-          <AdminAction icon="📦" title="Sipariş Yönetimi" desc="Sipariş oluştur, takip et ve operasyon sürecini yönet." href="/admin/siparisler" />
-          <AdminAction icon="💬" title="WhatsApp Gönderim" desc="Toplu template gönderimi ve kampanya yönetimi." href="/admin/whatsapp/gonder" highlight />
-          <AdminAction icon="📊" title="WhatsApp Raporları" desc="Gönderim ilerlemesini ve başarısız mesajları takip et." href="/admin/whatsapp/raporlar" />
-          <AdminAction icon="👥" title="Kullanıcılar" desc="Admin kullanıcıları ve erişimleri yönet." href="/admin/kullanicilar" />
-          <AdminAction icon="📝" title="Sipariş Formu" desc="Müşteri ve bayi sipariş formu oluştur." href="/admin/siparisler/form" />
-<AdminAction
-  icon="💳"
-  title="Kart Çekimleri"
-  desc="Tedarikçi ve müşteri kart çekimlerini yönet."
-  href="/admin/finans/kart-cekimleri"
-/>
-          <AdminAction icon="💰" title="Fiyat Sirkü" desc="Güncel fiyat paylaşım süreçlerini yönet." href="/admin/fiyat-formu" />
-        </section>
-      </div>
-    </main>
-  );
-}
-
-function AdminAction({
-  icon,
-  title,
-  desc,
-  href,
-  highlight,
-}: {
-  icon: string;
-  title: string;
-  desc: string;
-  href: string;
-  highlight?: boolean;
-}) {
-  return (
-    <Link
-      href={href}
-      prefetch={false}
-      className={`group rounded-[28px] p-5 shadow-sm ring-1 transition hover:-translate-y-0.5 hover:shadow-xl ${
-        highlight
-          ? "bg-gradient-to-br from-[#00a884] to-[#007f67] text-white ring-emerald-200"
-          : "bg-white text-slate-950 ring-slate-100"
-      }`}
-    >
-      <div className={`flex h-12 w-12 items-center justify-center rounded-2xl text-2xl ${highlight ? "bg-white/15" : "bg-slate-50"}`}>
-        {icon}
-      </div>
-      <h2 className="mt-4 text-lg font-black">{title}</h2>
-      <p className={`mt-2 text-sm leading-6 ${highlight ? "text-white/75" : "text-slate-500"}`}>
-        {desc}
-      </p>
-      <div className={`mt-5 text-sm font-black ${highlight ? "text-white" : "text-emerald-700"}`}>
-        Aç →
-      </div>
-    </Link>
-  );
-}
-
-function StatCard({
-  title,
-  value,
-  dark,
-}: {
-  title: string;
-  value: number;
-  dark?: boolean;
-}) {
-  return (
-    <div className={`rounded-3xl p-4 ring-1 ${dark ? "bg-white/10 text-white ring-white/15" : "bg-white text-slate-900 ring-slate-100"}`}>
-      <p className={dark ? "text-xs text-white/55" : "text-xs text-slate-400"}>
-        {title}
-      </p>
-      <p className="mt-1 text-3xl font-black">{value}</p>
-    </div>
-  );
+  return <Dashboard stats={stats} statsLoading={statsLoading} lastUpdated={lastUpdated} onRefresh={loadDashboardStats} onLogout={logout} />;
 }
