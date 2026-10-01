@@ -7,6 +7,7 @@ const urunler = [
   "CAN 26",
   "Kristal Amonyum Sülfat",
   "33 Amonyum Nitrat",
+  "8.20.0",
   "20.20.0",
   "Süper 20.20.0",
   "Granül Amonyum Sülfat",
