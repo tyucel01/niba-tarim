@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
+import { useConversation } from "@/lib/whatsapp/use-conversation";
+import { MessageContent } from "./message-content";
 
 type TemplateComponent = {
   type: string;
@@ -100,7 +102,7 @@ function StepBar({ hasTarget, hasTemplate, ready }: { hasTarget: boolean; hasTem
   ];
 
   return (
-    <div className="grid grid-cols-4 gap-2">
+    <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
       {steps.map((step, index) => (
         <div key={step.label} className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-3 shadow-sm">
           <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-black ${step.done ? "bg-[#00a884] text-white" : "bg-slate-100 text-slate-400"}`}>
@@ -138,7 +140,7 @@ export default function Page() {
   const [groupMembers, setGroupMembers] = useState<Record<string, GroupMember[]>>({});
 
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
-  const [conversationMessages, setConversationMessages] = useState<any[]>([]);
+  const conversationListRequest = useRef(0);
 
   const [headerImageUrl, setHeaderImageUrl] = useState("");
   const [bodyVariables, setBodyVariables] = useState<string[]>([]);
@@ -172,20 +174,17 @@ export default function Page() {
     if (data.success) setContacts(data.contacts || []);
   }
 
-  async function loadConversations() {
-    const res = await fetch(`/api/admin/whatsapp/conversations?t=${Date.now()}`, { cache: "no-store" });
-    const data = await res.json();
-    if (data.success) setConversations(data.conversations || []);
-  }
+  const loadConversations = useCallback(async () => {
+    const request = ++conversationListRequest.current;
+    try {
+      const res = await fetch(`/api/admin/whatsapp/conversations?t=${Date.now()}`, { cache: "no-store" });
+      const data = await res.json();
+      if (data.success && request === conversationListRequest.current) setConversations(data.conversations || []);
+    } catch { /* Retain the current list during temporary network errors. */ }
+  }, []);
 
-  async function loadConversationMessages(conversationId: string) {
-    const res = await fetch(`/api/admin/whatsapp/conversations/messages?conversationId=${conversationId}`);
-    const data = await res.json();
-
-    if (data.success) {
-      setConversationMessages(data.messages || []);
-    }
-  }
+  const { messages: conversationMessages, loading: messagesLoading, error: messagesError, refresh: refreshMessages } =
+    useConversation(selectedConversation?.id, loadConversations);
 
   async function loadGroupMembers(targetGroupId: string) {
     const res = await fetch(`/api/admin/whatsapp/group-members?groupId=${targetGroupId}`);
@@ -212,13 +211,12 @@ export default function Page() {
     }
   }
 
-  async function openConversation(conversation: Conversation) {
+  function openConversation(conversation: Conversation) {
     setSelectedConversation(conversation);
     setSelectedContact(null);
     setGroupId("");
     setReplyText("");
     setMsg("");
-    await loadConversationMessages(conversation.id);
   }
 
   async function loadTemplates() {
@@ -396,7 +394,7 @@ export default function Page() {
       setReplyText("");
       setMsg("✅ Cevap gönderildi.");
 
-      await loadConversationMessages(selectedConversation.id);
+      refreshMessages();
       await loadConversations();
     } catch (err) {
       setMsg("❌ Cevap hatası: " + String(err));
@@ -426,7 +424,6 @@ export default function Page() {
 
       if (selectedConversation?.id === conversationId) {
         setSelectedConversation(null);
-        setConversationMessages([]);
         setReplyText("");
       }
 
@@ -458,11 +455,11 @@ export default function Page() {
     return () => {
       clearInterval(interval);
     };
-  }, []);
+  }, [loadConversations]);
 
   return (
     <main className="min-h-screen bg-[#eef1ea] text-slate-900">
-      <div className="md:hidden min-h-screen bg-[#f7f8f4]">
+      <div className="lg:hidden min-h-dvh bg-[#f7f8f4]">
         {!selectedConversation && !groupId && !selectedContact ? (
           <div className="min-h-screen pb-6">
             <div className="sticky top-0 z-30 overflow-hidden bg-slate-950 px-5 pb-5 pt-4 text-white shadow-2xl">
@@ -496,7 +493,7 @@ export default function Page() {
             </div>
 
             <div className="px-4 pt-4">
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                 <a href="/admin/whatsapp/gonder" className="rounded-2xl bg-slate-950 p-3 text-center text-xs font-black text-white shadow-lg shadow-slate-900/10">
                   <div className="text-xl">📤</div>
                   <div className="mt-1">Gönder</div>
@@ -563,7 +560,6 @@ export default function Page() {
                           setGroupId(g.id);
                           setSelectedContact(null);
                           setSelectedConversation(null);
-                          setConversationMessages([]);
                           setMsg("");
                         }}
                         className="flex w-full items-center gap-3 py-3 text-left"
@@ -595,7 +591,6 @@ export default function Page() {
                           setSelectedContact(contact);
                           setGroupId("");
                           setSelectedConversation(null);
-                          setConversationMessages([]);
                           setMsg("");
                         }}
                         className="flex w-full items-center gap-3 py-3 text-left"
@@ -614,18 +609,17 @@ export default function Page() {
             </div>
           </div>
         ) : selectedConversation ? (
-          <div className="flex min-h-screen flex-col bg-[#efeae2]">
+          <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#efeae2]">
             <div className="sticky top-0 z-30 flex items-center justify-between bg-slate-950 px-4 py-4 text-white shadow-xl">
               <div className="flex min-w-0 items-center gap-3">
                 <button
                   type="button"
                   onClick={() => {
                     setSelectedConversation(null);
-                    setConversationMessages([]);
                     setReplyText("");
                     setMsg("");
                   }}
-                  className="text-2xl leading-none"
+                  aria-label="Geri dön" className="flex min-h-11 min-w-11 shrink-0 items-center justify-center text-2xl leading-none"
                 >
                   ←
                 </button>
@@ -642,18 +636,20 @@ export default function Page() {
               </button>
             </div>
 
-            <div className="flex-1 space-y-3 overflow-y-auto p-4">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 [overflow-wrap:anywhere]">
               {conversationMessages.map((message) => (
-                <div key={message.id} className={`max-w-[82%] rounded-2xl p-3 text-sm shadow-sm ${message.direction === "inbound" ? "bg-white" : "ml-auto bg-[#d9fdd3]"}`}>
-                  <p className="whitespace-pre-line text-slate-800">{message.message_text || "-"}</p>
+                <div key={message.id} className={`min-w-0 max-w-[90%] rounded-2xl p-3 text-sm shadow-sm ${message.direction === "inbound" ? "bg-white" : "ml-auto bg-[#d9fdd3]"}`}>
+                  <MessageContent message={message} />
                   <p className="mt-1 text-right text-[10px] text-slate-500">{formatDate(message.created_at)}</p>
                 </div>
               ))}
-              {conversationMessages.length === 0 && <div className="rounded-3xl bg-white p-6 text-center text-sm shadow-sm">Bu kişiyle henüz kayıtlı konuşma yok.</div>}
+              {messagesLoading && <p role="status" className="rounded-2xl bg-white p-4 text-sm">Mesajlar yükleniyor…</p>}
+              {messagesError && <p role="alert" className="rounded-2xl bg-red-50 p-4 text-sm text-red-700">{messagesError}</p>}
+              {!messagesLoading && !messagesError && conversationMessages.length === 0 && <div className="rounded-3xl bg-white p-6 text-center text-sm shadow-sm">Bu kişiyle henüz kayıtlı konuşma yok.</div>}
               {msg && <div className="rounded-2xl bg-white p-3 text-sm shadow-sm">{msg}</div>}
             </div>
 
-            <div className="sticky bottom-0 border-t border-slate-200 bg-white/95 p-3 backdrop-blur">
+            <div className="shrink-0 border-t border-slate-200 bg-white/95 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
               <div className="flex gap-2 rounded-2xl bg-slate-50 p-2 ring-1 ring-slate-100">
                 <input
                   value={replyText}
@@ -662,7 +658,7 @@ export default function Page() {
                     if (e.key === "Enter") sendReply();
                   }}
                   placeholder="Cevap yaz..."
-                  className="min-w-0 flex-1 rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-[#00a884]"
+                  className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-3 text-base outline-none focus:border-[#00a884]"
                 />
                 <button type="button" onClick={sendReply} disabled={replying || !replyText.trim()} className="rounded-xl bg-[#00a884] px-4 py-3 font-black text-white disabled:opacity-50">
                   {replying ? "..." : "Gönder"}
@@ -671,7 +667,7 @@ export default function Page() {
             </div>
           </div>
         ) : (
-          <div className="flex min-h-screen flex-col bg-[#f7f8f4]">
+          <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#f7f8f4]">
             <div className="sticky top-0 z-30 flex items-center gap-3 bg-slate-950 px-4 py-4 text-white shadow-xl">
               <button
                 type="button"
@@ -681,7 +677,7 @@ export default function Page() {
                   setSelectedConversation(null);
                   setMsg("");
                 }}
-                className="text-2xl leading-none"
+                aria-label="Geri dön" className="flex min-h-11 min-w-11 shrink-0 items-center justify-center text-2xl leading-none"
               >
                 ←
               </button>
@@ -694,7 +690,7 @@ export default function Page() {
               </div>
             </div>
 
-            <div className="flex-1 space-y-4 overflow-y-auto p-4">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 [overflow-wrap:anywhere]">
               <StepBar hasTarget={hasTarget} hasTemplate={!!selectedTemplate} ready={readyToSend} />
 
               <PremiumCard className="p-4">
@@ -709,7 +705,7 @@ export default function Page() {
 
                 <button type="button" onClick={() => setTemplateModalOpen(true)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm transition hover:border-[#00a884] hover:shadow-md">
                   <div className="text-xs font-bold uppercase tracking-wide text-slate-400">Meta Template</div>
-                  <div className="mt-1 font-black text-slate-900">{selectedTemplate ? `${selectedTemplate.name} — ${selectedTemplate.language}` : "Template seç"}</div>
+                  <div className="mt-1 break-words font-black text-slate-900 [overflow-wrap:anywhere]">{selectedTemplate ? `${selectedTemplate.name} — ${selectedTemplate.language}` : "Template seç"}</div>
                   <div className="mt-1 text-xs text-slate-500">Template’i seç, değişkenleri doldur, WhatsApp önizlemesini kontrol et.</div>
                 </button>
 
@@ -775,7 +771,7 @@ export default function Page() {
               {msg && <div className="rounded-2xl bg-white p-4 text-sm font-semibold text-slate-900 shadow-sm ring-1 ring-slate-100">{msg}</div>}
             </div>
 
-            <div className="sticky bottom-0 border-t border-slate-200 bg-white/95 p-3 backdrop-blur">
+            <div className="shrink-0 border-t border-slate-200 bg-white/95 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
               <button
                 type="button"
                 onClick={() => setConfirmOpen(true)}
@@ -789,7 +785,7 @@ export default function Page() {
         )}
       </div>
 
-      <div className="hidden md:flex md:h-screen md:overflow-hidden md:bg-[#eef1ea]">
+      <div className="hidden lg:flex lg:h-dvh lg:overflow-hidden lg:bg-[#eef1ea]">
         <aside className="w-[420px] shrink-0 border-r border-slate-200/80 bg-white/80 shadow-2xl shadow-slate-900/5 backdrop-blur">
           <div className="relative overflow-hidden bg-slate-950 px-6 py-6 text-white">
             <div className="absolute -right-16 -top-20 h-48 w-48 rounded-full bg-[#00a884]/30 blur-3xl" />
@@ -821,7 +817,7 @@ export default function Page() {
             </div>
           </div>
 
-          <div className="grid grid-cols-4 gap-2 border-b border-slate-200 p-4">
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4 border-b border-slate-200 p-4">
             <a href="/admin/whatsapp/gonder" title="Gönder" className="flex flex-col items-center justify-center rounded-2xl bg-slate-950 px-2 py-3 text-xs font-black text-white shadow-lg shadow-slate-900/10">
               <span className="text-lg">📤</span>
               <span className="mt-1">Gönder</span>
@@ -896,7 +892,6 @@ export default function Page() {
                             setGroupId(g.id);
                             setSelectedContact(null);
                             setSelectedConversation(null);
-                            setConversationMessages([]);
                             setMsg("");
                           }}
                           className="flex min-w-0 flex-1 items-center gap-3 text-left"
@@ -924,7 +919,6 @@ export default function Page() {
                                   setSelectedContact(contact);
                                   setGroupId("");
                                   setSelectedConversation(null);
-                                  setConversationMessages([]);
                                   setMsg("");
                                 }}
                                 className={`mb-1 block w-full min-w-0 rounded-2xl px-3 py-2 text-left text-sm hover:bg-white ${selectedContact?.id === member.whatsapp_contacts?.id ? "bg-white" : ""}`}
@@ -959,7 +953,6 @@ export default function Page() {
                       setSelectedContact(contact);
                       setGroupId("");
                       setSelectedConversation(null);
-                      setConversationMessages([]);
                       setMsg("");
                     }}
                     className={`flex w-full items-center gap-3 rounded-3xl px-3 py-3 text-left hover:bg-white ${selectedContact?.id === contact.id ? "bg-white shadow-sm ring-1 ring-emerald-100" : ""}`}
@@ -1020,13 +1013,15 @@ export default function Page() {
               >
                 <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
                   {conversationMessages.map((message) => (
-                    <div key={message.id} className={`max-w-xl rounded-3xl p-4 text-sm shadow-lg shadow-black/5 ${message.direction === "inbound" ? "self-start bg-white" : "self-end bg-[#d9fdd3]"}`}>
-                      <p className="whitespace-pre-line leading-6 text-slate-800">{message.message_text || "-"}</p>
+                    <div key={message.id} className={`min-w-0 max-w-[min(85%,36rem)] rounded-3xl p-4 text-sm shadow-lg shadow-black/5 ${message.direction === "inbound" ? "self-start bg-white" : "self-end bg-[#d9fdd3]"}`}>
+                      <MessageContent message={message} />
                       <p className="mt-2 text-right text-[11px] text-slate-500">{formatDate(message.created_at)}</p>
                     </div>
                   ))}
 
-                  {conversationMessages.length === 0 && (
+                  {messagesLoading && <p role="status" className="rounded-2xl bg-white p-4 text-sm">Mesajlar yükleniyor…</p>}
+                  {messagesError && <p role="alert" className="rounded-2xl bg-red-50 p-4 text-sm text-red-700">{messagesError}</p>}
+                  {!messagesLoading && !messagesError && conversationMessages.length === 0 && (
                     <div className="rounded-[28px] bg-white p-10 text-center shadow-xl shadow-black/5">
                       <div className="text-4xl">💬</div>
                       <h3 className="mt-4 text-lg font-black text-slate-900">Konuşma yok</h3>
@@ -1341,7 +1336,7 @@ export default function Page() {
 
       {confirmOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-[32px] bg-white p-6 shadow-2xl">
+          <div className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-[24px] bg-white p-4 shadow-2xl sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.22em] text-emerald-700">Son Kontrol</p>
