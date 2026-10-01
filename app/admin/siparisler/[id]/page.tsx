@@ -3,13 +3,20 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import SevkForm from "../sevk-form";
+import { orderStage, stageLabels } from "@/lib/orders/workflow";
 
 export default function SiparisDetayPage() {
   const params = useParams();
   const routeId = decodeURIComponent(String(params.id || ""));
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [stage, setStage] = useState<"satis" | "sevk" | "fatura">("sevk");
+  useEffect(() => {
+    const readHash = () => { const hash = window.location.hash.slice(1); setStage(hash === "satis" || hash === "fatura" ? hash : "sevk"); };
+    readHash(); window.addEventListener("hashchange", readHash);
+    return () => window.removeEventListener("hashchange", readHash);
+  }, []);
   const [siparis, setSiparis] = useState<any>(null);
 
   const [purchaseInvoices, setPurchaseInvoices] = useState<any[]>([]);
@@ -146,39 +153,6 @@ export default function SiparisDetayPage() {
     }
   }
 
-  async function updateField(field: string, value: any) {
-    if (!siparis?.id) return;
-
-    try {
-      setSaving(true);
-
-      const res = await fetch("/api/admin/siparisler/update-field", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          id: siparis.id,
-          field,
-          value,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!data.success) {
-        alert(data.error || "Güncellenemedi");
-        return;
-      }
-
-      setSiparis(data.row);
-    } catch (err: any) {
-      alert(err?.message || "Güncellenemedi");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function matchInvoice(invoice: any) {
     if (!siparis?.id) return;
     if (matchingInvoice) return;
@@ -247,10 +221,10 @@ export default function SiparisDetayPage() {
   }, [routeId]);
 
   useEffect(() => {
-    if (!siparis?.id) return;
+    if (!siparis?.id || stage !== "fatura") return;
     loadPurchaseInvoices();
     loadContacts();
-  }, [siparis?.id]);
+  }, [siparis?.id, stage]);
 
   const calc = useMemo(() => {
     const alisFiyati = numberValue(siparis?.alisFiyati);
@@ -398,48 +372,14 @@ export default function SiparisDetayPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#eef1ea] p-4 text-slate-900 md:p-6">
-      <div className="mx-auto max-w-7xl space-y-5">
-        <Link href="/admin/siparisler" className="font-black text-emerald-800">
-          ← Siparişlere Dön
-        </Link>
-
-        <section className="overflow-hidden rounded-[34px] bg-slate-950 text-white shadow-2xl shadow-slate-900/10">
-          <div className="p-6 md:p-8">
-            <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.26em] text-emerald-300">
-                  Sipariş Detayı
-                </p>
-                <h1 className="mt-2 text-3xl font-black tracking-tight md:text-4xl">
-                  #{siparis.satisId || siparis.id}
-                </h1>
-                <p className="mt-2 text-base font-bold text-white/70">
-                  {siparis.bayi || "-"}
-                </p>
-                <p className="mt-1 text-sm text-white/45">
-                  {formatDate(siparis.satisTarihi)} · {siparis.urun || "-"} {siparis.marka ? `/ ${siparis.marka}` : ""}
-                </p>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <StatusPill ok={status.sevkOk} label="Sevk" good="Tamam" bad="Eksik" />
-                <StatusPill ok={status.gtsOk} label="GTS" good="Girildi" bad="Eksik" />
-                <StatusPill ok={status.alisOk} label="Alış Faturası" good="Var" bad="Yok" />
-              </div>
-            </div>
-
-            <div className="mt-7 grid gap-3 md:grid-cols-4">
-              <HeroStat label="Sipariş Tonajı" value={`${formatNumber(calc.siparisTonaj)} ton`} />
-              <HeroStat label="Teslim Olan" value={`${formatNumber(calc.teslimOlanTonaj)} ton`} />
-              <HeroStat label="Eksik Tonaj" value={`${formatNumber(calc.eksikTonaj)} ton`} />
-              <HeroStat label="Toplam Kar" value={formatMoney(calc.toplamKar)} />
-            </div>
-          </div>
-        </section>
-
-        <section className="grid gap-5 lg:grid-cols-[1fr_430px]">
-          <div className="space-y-5">
+    <main className="min-h-screen bg-[#f5f7f4] p-4 text-slate-900 md:p-8">
+      <div className="mx-auto max-w-6xl space-y-5">
+        <Link href="/admin/siparisler" className="text-sm font-semibold text-emerald-800">← Siparişler</Link>
+        <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center"><div><p className="text-sm text-slate-500">Sipariş #{siparis.satisId || siparis.id} · {formatDate(siparis.satisTarihi)}</p><h1 className="mt-1 text-2xl font-bold md:text-3xl">{siparis.bayi || 'Sipariş'}</h1><p className="mt-2 text-sm text-slate-500">{siparis.urun} · {siparis.marka} · {formatNumber(calc.siparisTonaj)} ton</p></div><span className="w-fit rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800">{stageLabels[orderStage(siparis)]}</span></header>
+        <nav aria-label="Sipariş aşamaları" className="grid grid-cols-3 gap-2">
+          {([['satis', '1. Alış–satış'], ['sevk', '2. Plaka–sevk'], ['fatura', '3. Fatura']] as const).map(([value, label]) => <a key={value} href={`#${value}`} aria-current={stage === value ? 'step' : undefined} className={`rounded-xl px-2 py-4 text-center text-sm font-bold ${stage === value ? 'bg-emerald-700 text-white' : 'border border-slate-200 bg-white text-slate-500'}`}>{label}</a>)}
+        </nav>
+        <div hidden={stage !== 'satis'} className="space-y-5">
             <Card title="Ticari Özet" subtitle="Alış, satış ve kârlılık bilgileri">
               <div className="grid gap-3 md:grid-cols-2">
                 <Info label="Bayi" value={siparis.bayi} />
@@ -462,17 +402,116 @@ export default function SiparisDetayPage() {
               </div>
             </Card>
 
-            <Card title="Operasyon Özeti" subtitle="Sevk ve fatura bilgileri">
-              <div className="grid gap-3 md:grid-cols-2">
-                <Info label="Plaka" value={siparis.plaka} />
-                <Info label="Sevk Yeri" value={siparis.sevkYeri} />
-                <Info label="Sevk No" value={siparis.sevkNo} />
-                <Info label="Gelen Fatura" value={siparis.gelenFatura || siparis.matched_purchase_invoice_no} />
-                <Info label="GTS" value={siparis.gts} />
-                <Info label="Sevk Durumu" value={siparis.sevkDurumu} />
-              </div>
-            </Card>
 
+          <div className="rounded-2xl bg-white p-5"><p className="text-sm text-slate-500">{siparis.not || 'Bu sipariş için not eklenmemiş.'}</p><a href="#sevk" className="mt-4 inline-flex rounded-xl bg-emerald-700 px-5 py-3 font-bold text-white">Plaka ve sevk bilgilerine geç →</a></div>
+        </div>
+        <div hidden={stage !== 'sevk'} className="space-y-5">
+          <SevkForm key={String(siparis.id)} order={siparis} onSaved={setSiparis} />
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500">Sipariş: {formatNumber(calc.siparisTonaj)} ton · Teslim: {formatNumber(calc.teslimOlanTonaj)} ton · Kalan: {formatNumber(calc.eksikTonaj)} ton</div>
+        </div>
+        <div hidden={stage !== 'fatura'} className="space-y-5">
+          <section className="rounded-2xl border border-slate-200 bg-white p-5"><h2 className="text-xl font-bold">Muhasebe / Fatura işlemleri</h2><p className="mt-2 text-sm text-slate-500">Tedarikçi cari kartını ve alış faturasını kontrol ederek satış faturasına geç.</p>
+            <div className="mt-4 flex flex-wrap gap-2">{[[status.sevkOk, 'Sevk'], [status.gtsOk, 'GTS'], [status.alisOk, 'Alış faturası']].map(([ok, label]) => <span key={String(label)} className={`rounded-full px-3 py-2 text-xs font-bold ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>{String(label)}: {ok ? 'Tamam' : 'Bekliyor'}</span>)}</div>
+            {siparis.sales_invoice_id || siparis.sales_invoice_no ? <p className="mt-4 font-bold text-emerald-800">Satış faturası oluşturuldu: {siparis.sales_invoice_no || siparis.sales_invoice_id}</p> : status.canInvoice ? <Link href={`/admin/siparisler/fatura-kes?siparisId=${encodeURIComponent(String(siparis.id))}`} prefetch={false} className="mt-4 inline-flex rounded-xl bg-emerald-700 px-5 py-3 font-bold text-white">Paraşüt’te satış faturası kes →</Link> : <p className="mt-4 text-sm text-slate-500">Satış faturası için sevk, GTS ve alış faturası kontrollerini tamamla.</p>}
+          </section>
+          <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <div className="min-w-0">
+            <section className="rounded-[30px] bg-white p-5 shadow-sm ring-1 ring-slate-100">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-700">
+                  Tedarikçi Cari Eşleşmesi
+                </p>
+                <h2 className="mt-1 text-2xl font-black text-slate-950">
+                  Paraşüt Cari Kartı
+                </h2>
+                <p className="mt-1 text-sm font-semibold text-slate-500">
+                  Alış faturasını giderleştirmek için doğru tedarikçi cari kartını seç.
+                </p>
+              </div>
+
+              {contactError && (
+                <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm font-bold text-red-700 ring-1 ring-red-100">
+                  {contactError}
+                </div>
+              )}
+
+              {loadingContacts ? (
+                <EmptyBox text="Cari kartlar yükleniyor..." />
+              ) : bestMatch?.contact ? (
+                <div className="mt-5 rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-100">
+                  <p className="text-xs font-black text-emerald-700">
+                    Tahmini Eşleşme
+                  </p>
+                  <p className="mt-1 text-sm font-black text-emerald-950">
+                    {getContactName(bestMatch.contact)}
+                  </p>
+                  <p className="mt-1 text-xs font-semibold text-emerald-800">
+                    VKN/TCKN: {getContactTaxNo(bestMatch.contact) || "-"} · Skor: %{bestMatch.score}
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedSupplierId(String(bestMatch.contact.id));
+                      setSupplierSearch(getContactName(bestMatch.contact));
+                    }}
+                    className="mt-3 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-black text-white"
+                  >
+                    Bu cari kartı kullan
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-5 rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-800 ring-1 ring-amber-100">
+                  Otomatik cari eşleşmesi bulunamadı. Aşağıdan arayarak seç.
+                </div>
+              )}
+
+              <div className="mt-5">
+                <label className="mb-2 block text-xs font-black uppercase tracking-wide text-slate-400">
+                  Cari Kart Ara / Değiştir
+                </label>
+
+                <p className="mb-2 text-xs font-bold text-slate-400">
+                  Yüklenen cari kart: {contacts.length} · Filtrelenen: {searchedContacts.length}
+                </p>
+
+                <input
+                  value={supplierSearch}
+                  onChange={(e) => setSupplierSearch(e.target.value)}
+                  placeholder="Tedarikçi adı veya VKN yaz..."
+                  className="mb-2 min-h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-bold outline-none focus:border-emerald-400"
+                />
+
+                <select
+                  value={selectedSupplierId}
+                  onChange={(e) => setSelectedSupplierId(e.target.value)}
+                  className="min-h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-bold outline-none focus:border-emerald-400"
+                >
+                  <option value="">Cari kart seç</option>
+
+                  {searchedContacts.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {getContactName(c)} {getContactTaxNo(c) ? `- ${getContactTaxNo(c)}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedSupplierId && selectedContact && (
+                <div className="mt-4 rounded-2xl bg-slate-950 p-4 text-white">
+                  <p className="text-xs font-black uppercase tracking-wide text-emerald-300">
+                    Seçili Cari Kart
+                  </p>
+                  <p className="mt-1 text-sm font-black">
+                    {getContactName(selectedContact)}
+                  </p>
+                  <p className="mt-1 text-xs font-semibold text-white/60">
+                    VKN/TCKN: {getContactTaxNo(selectedContact) || "-"}
+                  </p>
+                </div>
+              )}
+            </section>
+            </div><div className="min-w-0">
             <Card title="Gelen E-Faturalar" subtitle="Seçili tedarikçi cari kartına ait gelen e-faturaları gösterir">
               {siparis.matched_purchase_invoice_no && (
                 <div className="mb-4 rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-100">
@@ -556,163 +595,9 @@ export default function SiparisDetayPage() {
                 </div>
               )}
             </Card>
+            </div>
           </div>
-
-          <aside className="space-y-5 lg:sticky lg:top-6 lg:self-start">
-            <section className="rounded-[30px] bg-white p-5 shadow-sm ring-1 ring-slate-100">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-700">
-                    Operasyon Paneli
-                  </p>
-                  <h2 className="mt-1 text-2xl font-black text-slate-950">
-                    Sonradan Güncelle
-                  </h2>
-                  <p className="mt-1 text-sm font-semibold text-slate-500">
-                    Plaka, teslim tonajı, sevk ve GTS bilgilerini buradan güncelle.
-                  </p>
-                </div>
-
-                {saving && (
-                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 ring-1 ring-emerald-100">
-                    Kaydediliyor...
-                  </span>
-                )}
-              </div>
-
-              <div className="mt-5 space-y-4">
-                <EditableField
-                  label="Plaka"
-                  value={siparis.plaka || ""}
-                  disabled={saving}
-                  placeholder="Örn: 34 ABC 123"
-                  onSave={(v) => updateField("plaka", v)}
-                />
-
-                <EditableField
-                  label="Teslim Olan Tonaj"
-                  value={siparis.teslimOlanTonaj || ""}
-                  type="number"
-                  disabled={saving}
-                  placeholder="Örn: 27"
-                  onSave={(v) => updateField("teslimOlanTonaj", Number(v) || 0)}
-                />
-
-                <SelectField
-                  label="Sevk Durumu"
-                  value={siparis.sevkDurumu || ""}
-                  disabled={saving}
-                  options={["", "Bekliyor", "Kısmi Sevk", "Sevk Edildi", "Tamamlandı", "İptal"]}
-                  onSave={(v) => updateField("sevkDurumu", v)}
-                />
-
-                <SelectField
-                  label="GTS"
-                  value={siparis.gts || ""}
-                  disabled={saving}
-                  options={["", "Yok", "Bekliyor", "Girildi"]}
-                  onSave={(v) => updateField("gts", v)}
-                />
-              </div>
-            </section>
-
-            <section className="rounded-[30px] bg-white p-5 shadow-sm ring-1 ring-slate-100">
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-700">
-                  Tedarikçi Cari Eşleşmesi
-                </p>
-                <h2 className="mt-1 text-2xl font-black text-slate-950">
-                  Paraşüt Cari Kartı
-                </h2>
-                <p className="mt-1 text-sm font-semibold text-slate-500">
-                  Alış faturasını giderleştirmek için doğru tedarikçi cari kartını seç.
-                </p>
-              </div>
-
-              {contactError && (
-                <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm font-bold text-red-700 ring-1 ring-red-100">
-                  {contactError}
-                </div>
-              )}
-
-              {loadingContacts ? (
-                <EmptyBox text="Cari kartlar yükleniyor..." />
-              ) : bestMatch?.contact ? (
-                <div className="mt-5 rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-100">
-                  <p className="text-xs font-black text-emerald-700">
-                    Tahmini Eşleşme
-                  </p>
-                  <p className="mt-1 text-sm font-black text-emerald-950">
-                    {getContactName(bestMatch.contact)}
-                  </p>
-                  <p className="mt-1 text-xs font-semibold text-emerald-800">
-                    VKN/TCKN: {getContactTaxNo(bestMatch.contact) || "-"} · Skor: %{bestMatch.score}
-                  </p>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedSupplierId(String(bestMatch.contact.id));
-                      setSupplierSearch(getContactName(bestMatch.contact));
-                    }}
-                    className="mt-3 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-black text-white"
-                  >
-                    Bu cari kartı kullan
-                  </button>
-                </div>
-              ) : (
-                <div className="mt-5 rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-800 ring-1 ring-amber-100">
-                  Otomatik cari eşleşmesi bulunamadı. Aşağıdan arayarak seç.
-                </div>
-              )}
-
-              <div className="mt-5">
-                <label className="mb-2 block text-xs font-black uppercase tracking-wide text-slate-400">
-                  Cari Kart Ara / Değiştir
-                </label>
-
-                <p className="mb-2 text-xs font-bold text-slate-400">
-                  Yüklenen cari kart: {contacts.length} · Filtrelenen: {searchedContacts.length}
-                </p>
-
-                <input
-                  value={supplierSearch}
-                  onChange={(e) => setSupplierSearch(e.target.value)}
-                  placeholder="Tedarikçi adı veya VKN yaz..."
-                  className="mb-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold outline-none focus:border-emerald-400"
-                />
-
-                <select
-                  value={selectedSupplierId}
-                  onChange={(e) => setSelectedSupplierId(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold outline-none focus:border-emerald-400"
-                >
-                  <option value="">Cari kart seç</option>
-
-                  {searchedContacts.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {getContactName(c)} {getContactTaxNo(c) ? `- ${getContactTaxNo(c)}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {selectedSupplierId && selectedContact && (
-                <div className="mt-4 rounded-2xl bg-slate-950 p-4 text-white">
-                  <p className="text-xs font-black uppercase tracking-wide text-emerald-300">
-                    Seçili Cari Kart
-                  </p>
-                  <p className="mt-1 text-sm font-black">
-                    {getContactName(selectedContact)}
-                  </p>
-                  <p className="mt-1 text-xs font-semibold text-white/60">
-                    VKN/TCKN: {getContactTaxNo(selectedContact) || "-"}
-                  </p>
-                </div>
-              )}
-            </section>
-          </aside>
-        </section>
+        </div>
       </div>
     </main>
   );
@@ -735,15 +620,6 @@ function Card({
       </div>
       <div className="mt-5">{children}</div>
     </section>
-  );
-}
-
-function HeroStat({ label, value }: { label: string; value: any }) {
-  return (
-    <div className="rounded-3xl bg-white/10 p-4 ring-1 ring-white/15">
-      <p className="text-xs font-bold text-white/55">{label}</p>
-      <p className="mt-1 text-xl font-black text-white">{value}</p>
-    </div>
   );
 }
 
@@ -773,92 +649,6 @@ function EmptyBox({ text }: { text: string }) {
   return (
     <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-500 ring-1 ring-slate-100">
       {text}
-    </div>
-  );
-}
-
-function StatusPill({ ok, label, good, bad }: { ok: boolean; label: string; good: string; bad: string }) {
-  return (
-    <div className={`rounded-full px-4 py-2 text-xs font-black ring-1 ${ok ? "bg-emerald-400/15 text-emerald-200 ring-emerald-300/20" : "bg-red-400/15 text-red-200 ring-red-300/20"}`}>
-      {label}: {ok ? good : bad}
-    </div>
-  );
-}
-
-function EditableField({
-  label,
-  value,
-  onSave,
-  disabled,
-  type = "text",
-  placeholder = "",
-}: {
-  label: string;
-  value: any;
-  onSave: (v: string) => void;
-  disabled?: boolean;
-  type?: string;
-  placeholder?: string;
-}) {
-  const [local, setLocal] = useState(String(value || ""));
-
-  useEffect(() => {
-    setLocal(String(value || ""));
-  }, [value]);
-
-  return (
-    <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-100">
-      <p className="text-xs font-black uppercase tracking-wide text-slate-400">{label}</p>
-      <div className="mt-2 flex gap-2">
-        <input
-          type={type}
-          value={local}
-          disabled={disabled}
-          placeholder={placeholder}
-          onChange={(e) => setLocal(e.target.value)}
-          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none focus:border-emerald-400 disabled:opacity-50"
-        />
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onSave(local)}
-          className="rounded-xl bg-slate-950 px-4 py-2 text-xs font-black text-white disabled:opacity-50"
-        >
-          Kaydet
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function SelectField({
-  label,
-  value,
-  options,
-  onSave,
-  disabled,
-}: {
-  label: string;
-  value: string;
-  options: string[];
-  onSave: (v: string) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-100">
-      <p className="text-xs font-black uppercase tracking-wide text-slate-400">{label}</p>
-      <select
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onSave(e.target.value)}
-        className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none focus:border-emerald-400 disabled:opacity-50"
-      >
-        {options.map((x) => (
-          <option key={x} value={x}>
-            {x || "Seçiniz"}
-          </option>
-        ))}
-      </select>
     </div>
   );
 }

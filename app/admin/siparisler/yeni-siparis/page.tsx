@@ -253,9 +253,14 @@ function update(name: keyof FormState, value: string) {
     if (!form.bayi.trim()) return setMessage("❌ Bayi alanı boş olamaz.");
     if (!form.urun.trim()) return setMessage("❌ Ürün alanı boş olamaz.");
 
+    if (!(Number(form.siparisTonaj) > 0)) return setMessage("Sipariş miktarı sıfırdan büyük olmalı.");
+    if (!(Number(form.pesinSatisFiyati) > 0)) return setMessage("Satış fiyatı sıfırdan büyük olmalı.");
+    if (saving) return;
+    setSaving(true);
     const duplicateMessage = await checkDuplicate();
 
     if (duplicateMessage) {
+      setSaving(false);
       setMessage(`❌ ${duplicateMessage}`);
       return;
     }
@@ -308,127 +313,46 @@ function update(name: keyof FormState, value: string) {
   }
 
   return (
-    <main className="min-h-screen bg-[#eef1ea] p-4 text-slate-900 md:p-6">
-      <div className="mx-auto max-w-7xl">
-        <Link href="/admin" prefetch={false} className="font-black text-emerald-800">
-          ← Admin Panel
-        </Link>
-
-        <div className="mt-4 rounded-[32px] bg-slate-950 p-6 text-white shadow-2xl shadow-slate-900/10">
-          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.24em] text-emerald-300">
-                Niba Tarım
-              </p>
-              <h1 className="mt-2 text-3xl font-black tracking-tight">
-                Sipariş Kaydı
-              </h1>
-              <p className="mt-2 text-sm text-white/60">
-                Sipariş No otomatik gelir. Aynı Sipariş No, Fatura No veya Sevk
-                No tekrar girilirse sistem uyarı verir.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={saveOrder}
-              disabled={saving}
-className="sticky top-4 z-40 rounded-2xl bg-gradient-to-r from-[#00a884] to-[#00c297] px-6 py-4 font-black text-white shadow-xl shadow-emerald-900/20 disabled:opacity-50"            >
-              {saving ? "Kaydediliyor..." : "Siparişi Kaydet"}
-            </button>
+    <main className="min-h-screen bg-[#f5f7f4] p-4 pb-28 text-slate-900 md:p-8">
+      <div className="mx-auto max-w-4xl space-y-5">
+        <Link href="/admin/siparisler" prefetch={false} className="text-sm font-semibold text-emerald-800">← Siparişler</Link>
+        <header><p className="text-xs font-bold uppercase tracking-widest text-emerald-700">1 · Alış ve satış</p><h1 className="mt-2 text-3xl font-bold">Yeni sipariş</h1><p className="mt-2 text-sm text-slate-500">Siparişi kaydet. Plaka ve sevk bilgilerini araç belli olduğunda ekleyebilirsin.</p></header>
+        <div className="grid grid-cols-3 gap-2 text-center text-xs font-semibold"><span className="rounded-xl bg-emerald-700 p-3 text-white">1. Alış–satış</span><span className="rounded-xl bg-white p-3 text-slate-400">2. Plaka–sevk</span><span className="rounded-xl bg-white p-3 text-slate-400">3. Fatura</span></div>
+        {message && <p role="status" className="rounded-xl border border-slate-200 bg-white p-4 font-semibold">{message}</p>}
+        <form onSubmit={(event) => { event.preventDefault(); if (!saving) void saveOrder(); }} className="space-y-5">
+          <Panel title="Kimden alıyoruz, kime satıyoruz?">
+            <Grid>
+              <SmartInput label="Bayi / Müşteri *" name="bayi" value={form.bayi} update={update} suggestions={suggestions.bayi} />
+              <SmartInput label="Tedarikçi" name="tedarikciler" value={form.tedarikciler} update={update} suggestions={suggestions.tedarikciler} />
+            </Grid>
+          </Panel>
+          <Panel title="Ürün ve fiyat">
+            <Grid>
+              <SmartInput label="Ürün *" name="urun" value={form.urun} update={update} suggestions={suggestions.urun} />
+              <SmartInput label="Marka" name="marka" value={form.marka} update={update} suggestions={suggestions.marka} />
+              <Input label="Sipariş miktarı (ton) *" name="siparisTonaj" type="number" value={form.siparisTonaj} update={update} />
+              <Input label="Alış fiyatı (₺ / ton)" name="alisFiyati" type="number" value={form.alisFiyati} update={update} />
+              <Input label="Satış fiyatı (₺ / ton) *" name="pesinSatisFiyati" type="number" value={form.pesinSatisFiyati} update={update} />
+              <SelectInput label="Ödeme şekli" name="satisTuru" value={form.satisTuru} update={update} options={selectOptions.satisTuru || []} />
+            </Grid>
+            {form.satisTuru !== "Peşin" && <div className="mt-5 rounded-xl bg-slate-50 p-4"><Grid>
+              <Input label="Vade tarihi" name="vadeTarihi" type="date" value={form.vadeTarihi} update={update} />
+              <Input label="Vade farkı (₺ / ton)" name="vadeFarki" type="number" value={form.vadeFarki} update={update} />
+              <Input label="Vade süresi" name="vadeSuresi" value={form.vadeSuresi} update={update} />
+            </Grid></div>}
+          </Panel>
+          <details className="rounded-2xl border border-slate-200 bg-white p-5"><summary className="cursor-pointer font-semibold">Tarih, siparişi alan ve ek bilgiler</summary><div className="mt-5"><Grid>
+            <Input label="Sipariş no" name="satisId" value={form.satisId} update={update} readOnly />
+            <Input label="Satış tarihi" name="satisTarihi" type="date" value={form.satisTarihi} update={update} />
+            <SmartInput label="Siparişi alan" name="siparisAlan" value={form.siparisAlan} update={update} suggestions={suggestions.siparisAlan} />
+            <Input label="Nakliye tutarı (₺)" name="nakliye" type="number" value={form.nakliye} update={update} />
+            <Input label="Yapılan ödeme (₺)" name="yapilanOdeme" type="number" value={form.yapilanOdeme} update={update} />
+            <Input label="Not" name="not" value={form.not} update={update} />
+          </Grid></div></details>
+          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:static md:rounded-2xl md:border md:p-5">
+            <div className="mx-auto flex max-w-4xl items-center justify-between gap-4"><div><p className="text-xs text-slate-500">Satış toplamı</p><p className="text-xl font-bold text-emerald-800">{formatMoney(calc.bayiSatisToplam)}</p></div><button type="submit" disabled={saving} className="min-h-12 rounded-xl bg-emerald-700 px-5 font-bold text-white disabled:opacity-50">{saving ? "Kaydediliyor…" : "Siparişi kaydet"}</button></div>
           </div>
-
-          {message && (
-            <div className="mt-4 rounded-2xl bg-white/10 p-4 text-sm font-bold ring-1 ring-white/15">
-              {message}
-            </div>
-          )}
-        </div>
-
-        <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
-          <div className="space-y-6">
-            <Panel title="Satış Bilgileri">
-              <Grid>
-                <Input label="Sipariş No" name="satisId" value={form.satisId} update={update} readOnly />
-                <Input label="Satış Tarihi" name="satisTarihi" type="date" value={form.satisTarihi} update={update} />
-                <SmartInput label="Bayi" name="bayi" value={form.bayi} update={update} suggestions={suggestions.bayi} />
-                <SmartInput label="Tedarikçiler" name="tedarikciler" value={form.tedarikciler} update={update} suggestions={suggestions.tedarikciler} />
-                <SmartInput label="Sipariş Alan" name="siparisAlan" value={form.siparisAlan} update={update} suggestions={suggestions.siparisAlan} />
-                <SelectInput label="Satış Türü" name="satisTuru" value={form.satisTuru} update={update} options={selectOptions.satisTuru || []} />
-              </Grid>
-            </Panel>
-
-            <Panel title="Ürün ve Fiyat Bilgileri">
-              <Grid>
-                <SmartInput label="Ürün" name="urun" value={form.urun} update={update} suggestions={suggestions.urun} />
-                <SmartInput label="Marka" name="marka" value={form.marka} update={update} suggestions={suggestions.marka} />
-                <Input label="Alış Fiyatı" name="alisFiyati" type="number" value={form.alisFiyati} update={update} />
-                <Readonly label="Tedarikçiye Ödenecek Tutar" value={calc.tedarikciyeOdenecekTutar} />
-                <Input label="Fatura No" name="faturaNo" value={form.faturaNo} update={update} />
-                <Input label="Tedarikçi Fatura Tutarı" name="tedarikciFaturaTutar" type="number" value={form.tedarikciFaturaTutar} update={update} />
-                <Input label="Peşin Satış Fiyatı" name="pesinSatisFiyati" type="number" value={form.pesinSatisFiyati} update={update} />
-                <Readonly label="Ton Başı Kar" value={calc.tonBasiKar} />
-              </Grid>
-            </Panel>
-
-            <Panel title="Sipariş ve Teslimat">
-              <Grid>
-                <Input label="Sipariş Tonajı" name="siparisTonaj" type="number" value={form.siparisTonaj} update={update} />
-                <Input label="Teslim Olan Tonaj" name="teslimOlanTonaj" type="number" value={form.teslimOlanTonaj} update={update} />
-                <Readonly label="Eksik Tonaj" value={calc.eksikTonaj} />
-                <Input label="Nakliye" name="nakliye" type="number" value={form.nakliye} update={update} />
-                <SmartInput label="Sevk Yeri" name="sevkYeri" value={form.sevkYeri} update={update} suggestions={suggestions.sevkYeri} />
-                <Input label="Not" name="not" value={form.not} update={update} />
-              </Grid>
-            </Panel>
-
-{form.satisTuru !== "Peşin" && (
-  <Panel title="Vade ve Ödeme">
-    <Grid>
-      <Input label="Yapılan Ödeme" name="yapilanOdeme" type="number" value={form.yapilanOdeme} update={update} />
-      <Input label="Vade Tarihi" name="vadeTarihi" type="date" value={form.vadeTarihi} update={update} />
-      <Input label="Vade Farkı" name="vadeFarki" type="number" value={form.vadeFarki} update={update} />
-      <Input label="Vade Süresi" name="vadeSuresi" value={form.vadeSuresi} update={update} />
-      <Readonly label="Vadeli Fiyat" value={calc.vadeliFiyat} />
-    </Grid>
-  </Panel>
-)}
-
-            <Panel title="Kayıttan Sonra Girilecek Operasyon Bilgileri">
-              <Grid>
-                <SmartInput label="Plaka" name="plaka" value={form.plaka} update={update} suggestions={suggestions.plaka} />
-                <SelectInput label="Sevk Durumu" name="sevkDurumu" value={form.sevkDurumu} update={update} options={selectOptions.sevkDurumu || []} />
-                <SelectInput label="Gelen Fatura" name="gelenFatura" value={form.gelenFatura} update={update} options={selectOptions.gelenFatura || []} />
-                <Input label="Sevk No" name="sevkNo" value={form.sevkNo} update={update} />
-                <SelectInput label="GTS" name="gts" value={form.gts} update={update} options={selectOptions.gts || []} />
-                <SelectInput label="Fatura" name="fatura" value={form.fatura} update={update} options={selectOptions.fatura || []} />
-              </Grid>
-            </Panel>
-          </div>
-
-          <aside className="h-fit rounded-[28px] bg-white p-6 shadow-sm ring-1 ring-slate-100 lg:sticky lg:top-6">
-            <h2 className="text-xl font-black text-slate-950">Otomatik Özet</h2>
-
-            <div className="mt-6 space-y-4">
-              <Summary label="Tedarikçiye Ödenecek" value={calc.tedarikciyeOdenecekTutar} />
-              <Summary label="Bayiye Satış Toplamı" value={calc.bayiSatisToplam} />
-              <Summary label="Ton Başı Kar" value={calc.tonBasiKar} />
-              <Summary label="Eksik Tonaj" value={calc.eksikTonaj} suffix=" ton" />
-              <Summary label="Perakende Karı" value={calc.perakendeKari} />
-              <Summary label="Kar %" value={calc.karYuzde} suffix="%" />
-              <Summary label="Vadeli Fiyat" value={calc.vadeliFiyat} />
-
-<button
-  type="button"
-  onClick={saveOrder}
-  disabled={saving}
-  className="mt-6 w-full rounded-2xl bg-gradient-to-r from-[#00a884] to-[#00c297] px-6 py-4 font-black text-white shadow-xl shadow-emerald-900/20 disabled:opacity-50"
->
-  {saving ? "Kaydediliyor..." : "Siparişi Kaydet"}
-</button>
-            </div>
-          </aside>
-        </section>
+        </form>
       </div>
     </main>
   );
@@ -436,7 +360,7 @@ className="sticky top-4 z-40 rounded-2xl bg-gradient-to-r from-[#00a884] to-[#00
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-[28px] bg-white p-6 shadow-sm ring-1 ring-slate-100">
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <h2 className="text-xl font-black text-slate-950">{title}</h2>
       <div className="mt-6">{children}</div>
     </section>
@@ -444,7 +368,7 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 }
 
 function Grid({ children }: { children: React.ReactNode }) {
-  return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{children}</div>;
+  return <div className="grid gap-4 md:grid-cols-2">{children}</div>;
 }
 
 function Input({
@@ -467,6 +391,8 @@ function Input({
       <span className="text-sm font-bold text-slate-600">{label}</span>
       <input
         type={type}
+        step={type === "number" ? "any" : undefined}
+        min={type === "number" ? 0 : undefined}
         value={value}
         readOnly={readOnly}
         onChange={(e) => update(name, e.target.value)}
@@ -521,7 +447,7 @@ function SmartInput({
             setTimeout(() => setOpen(false), 150);
           }}
           onChange={(e) => update(name, e.target.value)}
-          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#00a884] focus:ring-4 focus:ring-emerald-100"
+          className="mt-2 min-h-12 w-full text-base rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#00a884] focus:ring-4 focus:ring-emerald-100"
         />
       </label>
 
@@ -584,7 +510,7 @@ function SelectInput({
       <select
         value={value}
         onChange={(e) => update(name, e.target.value)}
-        className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#00a884] focus:ring-4 focus:ring-emerald-100"
+        className="mt-2 min-h-12 w-full text-base rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-[#00a884] focus:ring-4 focus:ring-emerald-100"
       >
         {options.map((option) => (
           <option key={option} value={option}>
@@ -596,43 +522,6 @@ function SelectInput({
   );
 }
 
-function Readonly({ label, value }: { label: string; value: number }) {
-  return (
-    <label className="block">
-      <span className="text-sm font-bold text-slate-600">{label}</span>
-      <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-black text-emerald-900">
-        {format(value)}
-      </div>
-    </label>
-  );
-}
-
-function Summary({
-  label,
-  value,
-  suffix = " TL",
-}: {
-  label: string;
-  value: number;
-  suffix?: string;
-}) {
-  return (
-    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-      <span className="text-sm font-semibold text-slate-600">{label}</span>
-      <span className="font-black text-emerald-900">
-        {format(value)}
-        {suffix}
-      </span>
-    </div>
-  );
-}
-
-function format(value: number) {
-  return new Intl.NumberFormat("tr-TR", {
-    maximumFractionDigits: 2,
-  }).format(value || 0);
-}
-
 function uniqueValues(values: string[]) {
   return Array.from(
     new Set(
@@ -642,3 +531,4 @@ function uniqueValues(values: string[]) {
     ),
   );
 }
+function formatMoney(value: number) { return new Intl.NumberFormat("tr-TR", {style: "currency", currency: "TRY", maximumFractionDigits: 2}).format(value); }

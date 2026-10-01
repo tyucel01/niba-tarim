@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { dispatchPatch } from "@/lib/orders/dispatch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,14 +10,15 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const allowedFields = [
-  "gts",
-  "sevkDurumu",
-  "plaka",
-  "teslimOlanTonaj",
-];
 export async function POST(req: NextRequest) {
   try {
+    const token = req.headers.get("authorization")?.match(/^Bearer (.+)$/i)?.[1];
+    if (!token) return NextResponse.json({ success: false, error: "Oturum açmanız gerekiyor." }, { status: 401 });
+    const { data: auth, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !auth.user || auth.user.is_anonymous) return NextResponse.json({ success: false, error: "Oturumunuz geçersiz." }, { status: 401 });
+    const emails = (process.env.ADMIN_EMAILS || "").split(",").map(value => value.trim().toLowerCase()).filter(Boolean);
+    const phones = (process.env.ADMIN_PHONES || "").split(",").map(value => value.replace(/\s/g, "")).filter(Boolean);
+    if ((emails.length || phones.length) && !emails.includes((auth.user.email || "").toLowerCase()) && !phones.includes(auth.user.phone || "")) return NextResponse.json({ success: false, error: "Bu işlem için yetkiniz yok." }, { status: 403 });
     const body = await req.json();
 
     const id = String(body?.id || "").trim();
@@ -30,18 +32,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!allowedFields.includes(field)) {
-      return NextResponse.json(
-        { success: false, error: "Bu alan güncellenemez." },
-        { status: 400 }
-      );
-    }
+    let patch;
+    try { patch = dispatchPatch(body.fields ?? { [field]: value }); }
+    catch (error) { return NextResponse.json({ success: false, error: error instanceof Error ? error.message : "Geçersiz alan." }, { status: 400 }); }
 
     const { data, error } = await supabase
       .from("siparisler")
-      .update({
-        [field]: value,
-      })
+      .update(patch)
       .eq("id", id)
       .select("*")
       .single();
@@ -57,11 +54,11 @@ export async function POST(req: NextRequest) {
       success: true,
       row: data,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     return NextResponse.json(
       {
         success: false,
-        error: err?.message || "Bilinmeyen hata",
+        error: err instanceof Error ? err.message : "Bilinmeyen hata",
       },
       { status: 500 }
     );
