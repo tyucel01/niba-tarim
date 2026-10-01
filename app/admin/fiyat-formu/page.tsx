@@ -15,6 +15,21 @@ const urunler = [
   "DAP",
 ];
 
+const depoSevkYerleri = [
+  "Mersin",
+  "Hatay",
+  "İskenderun",
+  "Marmara",
+  "Ege",
+  "Akdeniz",
+  "Karadeniz",
+  "Samsun",
+  "Tüm Bölgeler",
+];
+
+const fieldClassName =
+  "min-h-12 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-3 text-base focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-700/20 lg:rounded-lg lg:text-sm";
+
 const teslimSekilleri = ["Hariç", "Dahil"];
 
 type Row = {
@@ -130,8 +145,8 @@ export default function FiyatFormuPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 p-8 text-slate-900">
-      <div className="mx-auto max-w-6xl rounded-3xl bg-white p-8 shadow">
+    <main className="min-h-screen bg-slate-100 p-3 text-slate-900 sm:p-6 lg:p-8">
+      <div className="mx-auto max-w-6xl rounded-2xl bg-white p-4 shadow sm:p-6 lg:rounded-3xl lg:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <h1 className="text-2xl font-black">Fiyat Formu Oluştur</h1>
@@ -140,7 +155,7 @@ export default function FiyatFormuPage() {
             </p>
           </div>
 
-          <div className="w-full lg:w-80">
+          <div className="w-full lg:w-80 lg:shrink-0">
             <a href="/admin" className="mb-4 block font-bold text-emerald-800 lg:text-right">
               ← Admin Panel
             </a>
@@ -157,12 +172,12 @@ export default function FiyatFormuPage() {
                   maxLength={120}
                   required
                   disabled={savingProduct || productsLoading}
-                  className="min-w-0 flex-1 rounded-lg border bg-white px-3 py-2 text-sm"
+                  className={`${fieldClassName} flex-1`}
                 />
                 <button
                   type="submit"
                   disabled={savingProduct || productsLoading}
-                  className="rounded-lg bg-emerald-900 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                  className="min-h-12 shrink-0 rounded-lg bg-emerald-900 px-4 py-2 text-base font-bold text-white disabled:opacity-50"
                 >
                   {savingProduct ? "Ekleniyor…" : "Ekle"}
                 </button>
@@ -173,94 +188,86 @@ export default function FiyatFormuPage() {
           </div>
         </div>
 
-        <div className="mt-8 overflow-hidden rounded-2xl border">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-100 text-left">
-              <tr>
-                <th className="p-3">Gübre Cinsi</th>
-                <th className="p-3">Depo Sevk Yeri</th>
-                <th className="p-3">Teslim Şekli</th>
-                <th className="p-3">Peşin (TON)</th>
-                <th className="p-3">Kredi Kartı (TON)</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {rows.map((row, index) => (
-                <tr key={index} className="border-t">
-                  <td className="p-2">
-                    <select
-                      value={row.urun}
-                      onChange={(e) => updateRow(index, "urun", e.target.value)}
-                      className="w-full rounded-lg border px-3 py-2"
-                    >
-                      <option value="">Ürün seç</option>
-                      {productNames.map((urun) => (
-                        <option key={urun} value={urun}>
-                          {urun}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-
-                  <td className="p-2">
-                    <input
-                      value={row.depo}
-                      onChange={(e) => updateRow(index, "depo", e.target.value)}
-                      className="w-full rounded-lg border px-3 py-2"
-                      placeholder="Örn: Marmara,Ege"
-                    />
-                  </td>
-
-                  <td className="p-2">
-                    <select
-                      value={row.teslim}
-                      onChange={(e) =>
-                        updateRow(index, "teslim", e.target.value)
-                      }
-                      className="w-full rounded-lg border px-3 py-2"
-                    >
-                      <option value="">Seç</option>
-                      {teslimSekilleri.map((teslim) => (
-                        <option key={teslim} value={teslim}>
-                          {teslim}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-
-                  <td className="p-2">
-                    <input
-                      value={row.pesin}
-                      onChange={(e) =>
-                        updateRow(index, "pesin", e.target.value)
-                      }
-                      className="w-full rounded-lg border px-3 py-2"
-                      placeholder="29.750 / Fiyat Alınız"
-                    />
-                  </td>
-
-                  <td className="p-2">
-                    <input
-                      value={row.kredi}
-                      onChange={(e) =>
-                        updateRow(index, "kredi", e.target.value)
-                      }
-                      className="w-full rounded-lg border px-3 py-2"
-                      placeholder="31.650 / Fiyat Alınız"
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="mt-6 space-y-4 lg:mt-8 lg:space-y-0 lg:rounded-2xl lg:border lg:border-slate-200">
+          <div aria-hidden="true" className="hidden grid-cols-5 gap-3 rounded-t-2xl bg-slate-100 px-3 py-4 text-sm font-bold lg:grid">
+            <span>Gübre Cinsi</span>
+            <span>Depo Sevk Yeri</span>
+            <span>Teslim Şekli</span>
+            <span>Peşin (TON)</span>
+            <span>Kredi Kartı (TON)</span>
+          </div>
+          {rows.map((row, index) => (
+            <fieldset key={index} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:rounded-none lg:border-0 lg:border-t lg:bg-white lg:p-3 lg:last:rounded-b-2xl">
+              <legend className="px-2 text-sm font-bold text-emerald-900 lg:sr-only">
+                {index + 1}. Ürün
+              </legend>
+              <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 lg:gap-3">
+                <div className="min-w-0 sm:col-span-2 lg:col-span-1">
+                  <label htmlFor={`urun-${index}`} className="mb-2 block text-sm font-semibold lg:sr-only">Gübre Cinsi</label>
+                  <select
+                    id={`urun-${index}`}
+                    value={row.urun}
+                    onChange={(e) => updateRow(index, "urun", e.target.value)}
+                    className={fieldClassName}
+                  >
+                    <option value="">Ürün seç</option>
+                    {productNames.map((urun) => <option key={urun} value={urun}>{urun}</option>)}
+                  </select>
+                </div>
+                <div className="min-w-0">
+                  <label htmlFor={`depo-${index}`} className="mb-2 block text-sm font-semibold lg:sr-only">Depo Sevk Yeri</label>
+                  <select
+                    id={`depo-${index}`}
+                    value={row.depo}
+                    onChange={(e) => updateRow(index, "depo", e.target.value)}
+                    className={fieldClassName}
+                  >
+                    <option value="">Depo / bölge seç</option>
+                    {depoSevkYerleri.map((depo) => <option key={depo} value={depo}>{depo}</option>)}
+                  </select>
+                </div>
+                <div className="min-w-0">
+                  <label htmlFor={`teslim-${index}`} className="mb-2 block text-sm font-semibold lg:sr-only">Teslim Şekli</label>
+                  <select
+                    id={`teslim-${index}`}
+                    value={row.teslim}
+                    onChange={(e) => updateRow(index, "teslim", e.target.value)}
+                    className={fieldClassName}
+                  >
+                    <option value="">Teslim şekli seç</option>
+                    {teslimSekilleri.map((teslim) => <option key={teslim} value={teslim}>{teslim}</option>)}
+                  </select>
+                </div>
+                <div className="min-w-0">
+                  <label htmlFor={`pesin-${index}`} className="mb-2 block text-sm font-semibold lg:sr-only">Peşin (TON)</label>
+                  <input
+                    id={`pesin-${index}`}
+                    value={row.pesin}
+                    onChange={(e) => updateRow(index, "pesin", e.target.value)}
+                    className={fieldClassName}
+                    placeholder="29.750 / Fiyat Alınız"
+                  />
+                </div>
+                <div className="min-w-0">
+                  <label htmlFor={`kredi-${index}`} className="mb-2 block text-sm font-semibold lg:sr-only">Kredi Kartı (TON)</label>
+                  <input
+                    id={`kredi-${index}`}
+                    value={row.kredi}
+                    onChange={(e) => updateRow(index, "kredi", e.target.value)}
+                    className={fieldClassName}
+                    placeholder="31.650 / Fiyat Alınız"
+                  />
+                </div>
+              </div>
+            </fieldset>
+          ))}
         </div>
 
-        <div className="mt-6 flex gap-3">
+        <div className="sticky bottom-0 z-10 -mx-4 mt-6 flex gap-3 border-t border-slate-200 bg-white/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:border-0 lg:px-0 lg:py-0">
           <button
             type="button"
             onClick={addRow}
-            className="rounded-xl border px-5 py-3 font-bold"
+            className="min-h-12 flex-1 rounded-xl border border-slate-300 px-3 py-3 font-bold sm:flex-none sm:px-5"
           >
             Satır Ekle
           </button>
@@ -268,7 +275,7 @@ export default function FiyatFormuPage() {
           <button
             type="button"
             onClick={createPdf}
-            className="flex-1 rounded-xl bg-emerald-900 px-5 py-3 font-black text-white"
+            className="min-h-12 flex-1 rounded-xl bg-emerald-900 px-3 py-3 font-black text-white sm:px-5"
           >
             PDF Al
           </button>
