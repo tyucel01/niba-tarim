@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { useConversation } from "@/lib/whatsapp/use-conversation";
+import { PRICE_HANDOFF_KEY, parsePriceHandoff, handoffFile, type PriceHandoff } from "@/lib/whatsapp/price-handoff";
+import { SendConfirmation } from "./send-confirmation";
 import { MessageContent } from "./message-content";
 
 type TemplateComponent = {
@@ -142,6 +144,10 @@ export default function Page() {
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const conversationListRequest = useRef(0);
 
+  const [pendingPriceImage, setPendingPriceImage] = useState<PriceHandoff | null>(null);
+  const uploadController = useRef<AbortController | null>(null);
+  const [priceImageName, setPriceImageName] = useState("");
+  const [priceImageError, setPriceImageError] = useState("");
   const [headerImageUrl, setHeaderImageUrl] = useState("");
   const [bodyVariables, setBodyVariables] = useState<string[]>([]);
 
@@ -156,6 +162,24 @@ export default function Page() {
       if (!data.session) router.push("/admin");
     });
   }, [router]);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("source") !== "fiyat-formu") return;
+    try {
+      const draft = parsePriceHandoff(sessionStorage.getItem(PRICE_HANDOFF_KEY));
+      // Restore a browser handoff once; no campaign or recipient is selected here.
+      if (draft) {
+        setPendingPriceImage(draft); setPriceImageName(draft.name);
+      } else setPriceImageError("Fiyat görseli bulunamadı veya süresi doldu. Fiyat formundan tekrar aktarın.");
+    } catch { setPriceImageError("Fiyat görseli alınamadı. Fiyat formundan tekrar aktarın."); }
+  }, []);
+
+  function removePriceImage() {
+    uploadController.current?.abort();
+    setPendingPriceImage(null); setPriceImageName(""); setHeaderImageUrl(""); setPriceImageError("");
+    try { sessionStorage.removeItem(PRICE_HANDOFF_KEY); } catch { /* Storage may be unavailable. */ }
+    window.history.replaceState(null, "", window.location.pathname);
+  }
 
   async function logout() {
     await supabase.auth.signOut();
@@ -226,7 +250,7 @@ export default function Page() {
     if (data.success) {
       setTemplates(data.templates || []);
       const first = data.templates?.[0];
-      if (first) setSelectedTemplateKey(`${first.name}__${first.language}`);
+      if (first && new URLSearchParams(window.location.search).get("source") !== "fiyat-formu") setSelectedTemplateKey(`${first.name}__${first.language}`);
     } else {
       setMsg("❌ Template listesi alınamadı: " + JSON.stringify(data.error));
     }
@@ -261,7 +285,7 @@ export default function Page() {
   const variableCount = countVariables(bodyText);
   const previewText = replaceVariables(bodyText, bodyVariables);
   const hasTarget = !!groupId || !!selectedContact;
-  const readyToSend = hasTarget && !!selectedTemplate && (!hasImageHeader || !!headerImageUrl) && (variableCount === 0 || bodyVariables.every((v) => v.trim()));
+  const readyToSend = (!hasImageHeader || !priceImageError) && hasTarget && !!selectedTemplate && (!hasImageHeader || !!headerImageUrl) && (variableCount === 0 || bodyVariables.every((v) => v.trim()));
   const selectedGroupMemberCount = selectedGroup?.member_count || selectedGroup?.contacts_count || selectedGroup?.count || groupMembers[groupId]?.length || 0;
   const estimatedRecipients = selectedGroup ? selectedGroupMemberCount || "Grup" : selectedContact ? 1 : 0;
   const totalUnread = conversations.reduce((sum, item) => sum + (item.unread_count || 0), 0);
@@ -271,11 +295,11 @@ export default function Page() {
     setBodyVariables(values);
   }, [selectedTemplateKey, variableCount]);
 
-  useEffect(() => {
-    if (!hasImageHeader) setHeaderImageUrl("");
-  }, [hasImageHeader]);
+  // Keep a prepared image while choosing templates; text templates never receive it.
 
-  async function uploadImage(file: File) {
+  async function uploadImage(file: File, fromPrice = false) {
+    uploadController.current?.abort();
+    const controller = new AbortController(); uploadController.current = controller;
     try {
       setUploading(true);
       setMsg("Görsel yükleniyor...");
@@ -286,6 +310,7 @@ export default function Page() {
       const res = await fetch("/api/admin/whatsapp/media/upload", {
         method: "POST",
         body: formData,
+        signal: controller.signal,
       });
 
       const text = await res.text();
@@ -298,20 +323,29 @@ export default function Page() {
         return;
       }
 
-      if (data.success) {
+      if (controller.signal.aborted) return;
+      if (res.ok && data.success && typeof data.url === "string") {
         setHeaderImageUrl(data.url);
+        if (!fromPrice) { setPriceImageName(""); setPendingPriceImage(null);
+          try { sessionStorage.removeItem(PRICE_HANDOFF_KEY); } catch { /* Optional handoff. */ }
+        }
         setMsg("✅ Görsel yüklendi.");
       } else {
         setMsg("❌ Görsel yüklenemedi: " + JSON.stringify(data));
       }
-    } catch (err) {
-      setMsg("❌ Upload error: " + String(err));
+    } catch {
+      if (!controller.signal.aborted) setMsg("❌ Görsel yüklenemedi. Şablonu yeniden seçerek tekrar deneyin.");
     } finally {
-      setUploading(false);
+      if (uploadController.current === controller) setUploading(false);
     }
   }
 
   async function send() {
+    if (uploading || sending) return;
+    if (hasImageHeader && priceImageError) {
+      setMsg("❌ Fiyat görselini yeniden aktar veya başka bir görsel yükle.");
+      return;
+    }
     if (!groupId && !selectedContact) {
       setMsg("❌ Önce soldan bir grup veya kişi seçmelisin.");
       return;
@@ -346,7 +380,7 @@ export default function Page() {
           contactId: selectedContact?.id || null,
           templateName: selectedTemplate.name,
           languageCode: selectedTemplate.language,
-          headerImageUrl: headerImageUrl || null,
+          headerImageUrl: hasImageHeader ? headerImageUrl || null : null,
           bodyVariables,
         }),
       });
@@ -459,6 +493,16 @@ export default function Page() {
 
   return (
     <main className="min-h-screen bg-[#eef1ea] text-slate-900">
+      {(priceImageName || priceImageError) && <section className="border-b border-emerald-200 bg-emerald-50 p-4" aria-label="Fiyat formundan gelen görsel">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-4">
+          {priceImageName && (headerImageUrl || pendingPriceImage?.dataUrl) && <img src={headerImageUrl || pendingPriceImage?.dataUrl} alt="Hazırladığınız fiyat listesi" className="h-20 w-28 rounded-lg border border-emerald-200 bg-white object-contain" />}
+          <div className="min-w-0 flex-1"><h2 className="font-bold text-emerald-950">{priceImageName ? "Fiyat görselin hazır" : "Görsel aktarılamadı"}</h2>
+            <p className="mt-1 text-sm text-emerald-900">{(selectedTemplate && !hasImageHeader ? "Bu şablon yalnızca metin gönderecek. Hazır fiyat görseli mesaja eklenmeyecek." : priceImageError) || (hasImageHeader && headerImageUrl ? "Görsel şablona eklendi. Alıcı grubunu seçip önizlemeyi kontrol et." : uploading ? "Seçtiğin görsel şablonu için görsel yükleniyor…" : headerImageUrl ? "Hazır görsel bu şablonda kullanılmayacak." : "Görsel henüz sunucuya yüklenmedi. Görsel başlıklı bir şablon seçmelisin.")}</p>
+            <p className="mt-1 text-xs text-emerald-800">Henüz mesaj gönderilmedi.</p>
+          </div>
+          <button type="button" onClick={removePriceImage} className="min-h-11 rounded-xl border border-emerald-300 px-4 text-sm font-semibold">Görseli kaldır</button>
+        </div>
+      </section>}
       <div className="lg:hidden min-h-dvh bg-[#f7f8f4]">
         {!selectedConversation && !groupId && !selectedContact ? (
           <div className="min-h-screen pb-6">
@@ -712,7 +756,11 @@ export default function Page() {
                 {hasImageHeader && (
                   <div className="mt-4 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-100">
                     <label className="block text-xs font-black uppercase tracking-wide text-slate-500">Header Görseli</label>
-                    <input
+                    {headerImageUrl ? <div className="mt-3 rounded-xl border border-emerald-200 bg-white p-3">
+                      <img src={headerImageUrl} alt="Şablona eklenen fiyat görseli" className="max-h-72 w-full rounded-lg object-contain" />
+                      <p className="mt-2 break-all text-sm font-semibold text-emerald-900">{priceImageName || "Seçilen görsel"}</p>
+                      <button type="button" onClick={removePriceImage} className="mt-2 min-h-11 text-sm font-bold text-emerald-800 underline">Görseli değiştir</button>
+                    </div> : (<input
                       type="file"
                       accept="image/png,image/jpeg,image/jpg"
                       disabled={uploading}
@@ -721,7 +769,7 @@ export default function Page() {
                         if (file) uploadImage(file);
                       }}
                       className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
-                    />
+                    />)}
                     {uploading && <p className="mt-2 text-sm text-slate-500">Görsel yükleniyor...</p>}
                     {headerImageUrl && <div className="mt-3 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800">✅ Görsel yüklendi</div>}
                   </div>
@@ -756,7 +804,7 @@ export default function Page() {
                   <StatusPill tone={readyToSend ? "emerald" : "amber"}>{readyToSend ? "Hazır" : "Eksik"}</StatusPill>
                 </div>
                 <div className="ml-auto max-w-[88%] rounded-2xl rounded-tr-sm bg-[#d9fdd3] p-4 text-sm shadow-lg shadow-black/5">
-                  {headerImageUrl && <img src={headerImageUrl} alt="Header görseli" className="mb-3 max-h-64 w-full rounded-xl object-cover" />}
+                  {hasImageHeader && headerImageUrl && <img src={headerImageUrl} alt="Header görseli" className="mb-3 max-h-64 w-full rounded-xl object-contain" />}
                   <p className="whitespace-pre-line leading-6 text-slate-800">{previewText || selectedTemplate?.name || "Şablon seç"}</p>
                   <p className="mt-2 text-right text-[11px] text-slate-500">Şimdi · {selectedTemplate?.language || ""}</p>
                 </div>
@@ -1108,7 +1156,11 @@ export default function Page() {
                               </div>
                               {headerImageUrl && <StatusPill tone="emerald">Yüklendi</StatusPill>}
                             </div>
-                            <input
+                            {headerImageUrl ? <div className="mt-3 rounded-xl border border-emerald-200 bg-white p-3">
+                      <img src={headerImageUrl} alt="Şablona eklenen fiyat görseli" className="max-h-72 w-full rounded-lg object-contain" />
+                      <p className="mt-2 break-all text-sm font-semibold text-emerald-900">{priceImageName || "Seçilen görsel"}</p>
+                      <button type="button" onClick={removePriceImage} className="mt-2 min-h-11 text-sm font-bold text-emerald-800 underline">Görseli değiştir</button>
+                    </div> : (<input
                               type="file"
                               accept="image/png,image/jpeg,image/jpg"
                               disabled={uploading}
@@ -1117,7 +1169,7 @@ export default function Page() {
                                 if (file) uploadImage(file);
                               }}
                               className="mt-4 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900"
-                            />
+                            />)}
 
                             {uploading && <p className="mt-2 text-sm text-slate-500">Görsel yükleniyor...</p>}
 
@@ -1182,7 +1234,7 @@ export default function Page() {
 
                         <div className="flex justify-end">
                           <div className="relative max-w-sm rounded-3xl rounded-tr-sm bg-[#d9fdd3] p-4 shadow-xl shadow-black/5">
-                            {headerImageUrl && <img src={headerImageUrl} alt="Gönderilecek görsel" className="mb-3 max-h-72 w-full rounded-2xl object-cover" />}
+                            {hasImageHeader && headerImageUrl && <img src={headerImageUrl} alt="Gönderilecek görsel" className="mb-3 max-h-72 w-full rounded-2xl object-contain" />}
                             <p className="whitespace-pre-line text-sm leading-6 text-slate-800">{previewText || selectedTemplate?.name || "Şablon seç"}</p>
                             <p className="mt-3 text-right text-[11px] text-slate-500">Şimdi · {selectedTemplate?.language || ""}</p>
                           </div>
@@ -1284,7 +1336,13 @@ export default function Page() {
                       key={key}
                       type="button"
                       onClick={() => {
+                        uploadController.current?.abort();
+                        setUploading(false);
+                        setMsg("");
                         setSelectedTemplateKey(key);
+                        if (pendingPriceImage && isImageHeader && !headerImageUrl) {
+                          void uploadImage(handoffFile(pendingPriceImage), true);
+                        }
                         setTemplateModalOpen(false);
                         setTemplateSearch("");
                       }}
@@ -1334,65 +1392,15 @@ export default function Page() {
         </div>
       )}
 
-      {confirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
-          <div className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-[24px] bg-white p-4 shadow-2xl sm:p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.22em] text-emerald-700">Son Kontrol</p>
-                <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-950">Gönderimi Onayla</h2>
-                <p className="mt-1 text-sm text-slate-500">Mesajlar kuyruğa alınacak ve cron arka planda gönderecek.</p>
-              </div>
-              <StatusPill tone={readyToSend ? "emerald" : "amber"}>{readyToSend ? "Hazır" : "Eksik"}</StatusPill>
-            </div>
+      {confirmOpen && <SendConfirmation
+        target={selectedTargetName || ""} recipients={estimatedRecipients}
+        template={selectedTemplate?.name || ""} language={selectedTemplate?.language || ""}
+        imageUrl={hasImageHeader ? headerImageUrl : ""} message={previewText}
+        ready={Boolean(readyToSend)} sending={sending}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => { setConfirmOpen(false); void send(); }}
+      />}
 
-            <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-100">
-                <p className="text-xs font-bold text-slate-400">Hedef</p>
-                <p className="mt-1 truncate font-black text-slate-900">{selectedTargetName || "-"}</p>
-              </div>
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-100">
-                <p className="text-xs font-bold text-slate-400">Alıcı</p>
-                <p className="mt-1 font-black text-slate-900">{estimatedRecipients || "-"}</p>
-              </div>
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-100">
-                <p className="text-xs font-bold text-slate-400">Template</p>
-                <p className="mt-1 truncate font-black text-slate-900">{selectedTemplate?.name || "-"}</p>
-              </div>
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-100">
-                <p className="text-xs font-bold text-slate-400">Görsel</p>
-                <p className="mt-1 font-black text-slate-900">{headerImageUrl ? "Var" : "Yok"}</p>
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-3xl bg-[#efeae2] p-4">
-              <div className="ml-auto max-w-sm rounded-3xl rounded-tr-sm bg-[#d9fdd3] p-4 shadow-sm">
-                {headerImageUrl && <img src={headerImageUrl} alt="Gönderilecek görsel" className="mb-3 max-h-72 w-full rounded-2xl object-contain" />}
-                <p className="whitespace-pre-line text-sm leading-6 text-slate-800">{previewText || selectedTemplate?.name || "Şablon seç"}</p>
-                <p className="mt-2 text-right text-[11px] text-slate-500">Şimdi</p>
-              </div>
-            </div>
-
-            <div className="mt-6 flex gap-3">
-              <button type="button" onClick={() => setConfirmOpen(false)} className="flex-1 rounded-2xl bg-slate-100 py-3 font-black text-slate-700 hover:bg-slate-200">
-                Vazgeç
-              </button>
-
-              <button
-                type="button"
-                disabled={sending || !readyToSend}
-                onClick={async () => {
-                  setConfirmOpen(false);
-                  await send();
-                }}
-                className="flex-1 rounded-2xl bg-gradient-to-r from-[#00a884] to-[#00c297] py-3 font-black text-white shadow-xl shadow-emerald-900/15 disabled:opacity-50"
-              >
-                {sending ? "Kuyruğa alınıyor..." : "Gönderimi Başlat"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   );
 }

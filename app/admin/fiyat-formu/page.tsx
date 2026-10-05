@@ -139,9 +139,19 @@ export default function FiyatFormuPage() {
     ]);
   }
 
+  useEffect(() => {
+    try {
+      const draft = JSON.parse(sessionStorage.getItem("niba-price-draft") || "null");
+      // Restore browser-only draft after hydration when returning from preview.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (Array.isArray(draft) && draft.length && draft.every(row => row && ["urun", "depo", "teslim", "pesin", "kredi"].every(key => typeof row[key] === "string"))) setRows(draft);
+    } catch { /* An unavailable draft must not prevent editing. */ }
+  }, []);
+
   function createPdf() {
+    try { sessionStorage.setItem("niba-price-draft", JSON.stringify(rows)); } catch { /* Preview still works without storage. */ }
     const encoded = encodeURIComponent(JSON.stringify(rows));
-    window.open(`/admin/fiyat-formu/preview?rows=${encoded}`, "_blank");
+    window.location.assign(`/admin/fiyat-formu/preview?rows=${encoded}`);
   }
 
   return (
@@ -151,7 +161,7 @@ export default function FiyatFormuPage() {
           <div>
             <h1 className="text-2xl font-black">Fiyat Formu Oluştur</h1>
             <p className="mt-2 text-sm text-slate-500">
-              Ürün, depo, teslim şekli ve fiyatları girerek PDF oluştur.
+              Ürün ve fiyatları gir, sevk bölgelerini seç. Fiyat listesini önizleyip görsel olarak paylaş.
             </p>
           </div>
 
@@ -216,15 +226,27 @@ export default function FiyatFormuPage() {
                 </div>
                 <div className="min-w-0">
                   <label htmlFor={`depo-${index}`} className="mb-2 block text-sm font-semibold lg:sr-only">Depo Sevk Yeri</label>
-                  <select
-                    id={`depo-${index}`}
-                    value={row.depo}
-                    onChange={(e) => updateRow(index, "depo", e.target.value)}
-                    className={fieldClassName}
-                  >
-                    <option value="">Depo / bölge seç</option>
-                    {depoSevkYerleri.map((depo) => <option key={depo} value={depo}>{depo}</option>)}
-                  </select>
+                  <details className="group relative min-w-0 rounded-xl border border-slate-300 bg-white">
+                    <summary id={`depo-${index}`} className="min-h-12 cursor-pointer list-none px-3 py-3 text-base focus-visible:outline-2 focus-visible:outline-emerald-700 lg:text-sm">
+                      <span className="flex items-center justify-between gap-2"><span className="min-w-0 break-words">{row.depo || "Depo / bölge seç"}</span><span aria-hidden="true" className="shrink-0 text-slate-500">⌄</span></span>
+                    </summary>
+                    <div className="border-t border-slate-200 p-2">
+                      <p className="px-2 py-1 text-xs text-slate-500">Birden fazla bölge seçebilirsin.</p>
+                      {depoSevkYerleri.map(depo => {
+                        const selected = row.depo.split(", ").filter(Boolean);
+                        return <label key={depo} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-2 py-2 hover:bg-emerald-50">
+                          <input type="checkbox" checked={selected.includes(depo)} className="h-5 w-5 accent-emerald-800" onChange={event => {
+                            const next = event.target.checked
+                              ? depo === "Tüm Bölgeler" ? [depo] : [...selected.filter(value => value !== "Tüm Bölgeler"), depo]
+                              : selected.filter(value => value !== depo);
+                            updateRow(index, "depo", next.join(", "));
+                          }} />
+                          <span className="text-sm">{depo}</span>
+                        </label>;
+                      })}
+                      <button type="button" onClick={() => updateRow(index, "depo", "")} className="min-h-11 px-2 text-sm font-semibold text-emerald-800">Seçimi temizle</button>
+                    </div>
+                  </details>
                 </div>
                 <div className="min-w-0">
                   <label htmlFor={`teslim-${index}`} className="mb-2 block text-sm font-semibold lg:sr-only">Teslim Şekli</label>
@@ -275,9 +297,10 @@ export default function FiyatFormuPage() {
           <button
             type="button"
             onClick={createPdf}
-            className="min-h-12 flex-1 rounded-xl bg-emerald-900 px-3 py-3 font-black text-white sm:px-5"
+            disabled={!rows.some(row => row.urun || row.depo || row.teslim || row.pesin || row.kredi)}
+            className="min-h-12 flex-1 rounded-xl bg-emerald-900 px-3 py-3 font-black text-white disabled:opacity-40 sm:px-5"
           >
-            PDF Al
+            Önizle ve Paylaş
           </button>
         </div>
       </div>
