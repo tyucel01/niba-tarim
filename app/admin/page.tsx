@@ -1,6 +1,6 @@
 "use client";
 
-import Dashboard, { type DashboardStats } from "./dashboard";
+import Dashboard from "./dashboard";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
@@ -13,16 +13,6 @@ export default function AdminPage() {
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
-  const [statsLoading, setStatsLoading] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState("");
-
-  const [stats, setStats] = useState<DashboardStats>({
-    orders: 0,
-    users: 0,
-    activeCampaigns: 0,
-    pendingMessages: 0,
-  });
-
   useEffect(() => {
     let mounted = true;
 
@@ -39,7 +29,6 @@ export default function AdminPage() {
         if (data.session && otpVerified) {
           setStep("admin");
           setLoading(false);
-          await loadDashboardStats();
         } else {
           await supabase.auth.signOut();
           sessionStorage.removeItem("adminOtpVerified");
@@ -70,81 +59,6 @@ export default function AdminPage() {
       window.removeEventListener("pageshow", handlePageShow);
     };
   }, []);
-
-  async function countTable(
-    tableName: string,
-    filter?: { column: string; value: string },
-  ) {
-    try {
-      let query = supabase
-        .from(tableName)
-        .select("*", { count: "exact", head: true });
-
-      if (filter) query = query.eq(filter.column, filter.value);
-
-      const { count, error } = await query;
-      if (error) return 0;
-
-      return count || 0;
-    } catch {
-      return 0;
-    }
-  }
-
-  async function loadUserCount() {
-    try {
-      const res = await fetch(`/api/admin/users?t=${Date.now()}`, {
-        cache: "no-store",
-      });
-
-      const data = await res.json();
-
-      if (Array.isArray(data.users)) return data.users.length;
-      if (Array.isArray(data)) return data.length;
-
-      return 0;
-    } catch {
-      return 0;
-    }
-  }
-
-  async function loadDashboardStats() {
-    try {
-      setStatsLoading(true);
-
-      const orders =
-        (await countTable("siparisler")) || (await countTable("orders"));
-
-      const users = await loadUserCount();
-
-      const activeCampaigns = await countTable("whatsapp_campaigns", {
-        column: "status",
-        value: "processing",
-      });
-
-      const pendingMessages = await countTable("whatsapp_message_queue", {
-        column: "status",
-        value: "pending",
-      });
-
-      setStats({
-        orders,
-        users,
-        activeCampaigns,
-        pendingMessages,
-      });
-
-      setLastUpdated(
-        new Date().toLocaleTimeString("tr-TR", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        }),
-      );
-    } finally {
-      setStatsLoading(false);
-    }
-  }
 
   async function loginWithEmail() {
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -197,7 +111,6 @@ if (!userPhone) {
 
     sessionStorage.setItem("adminOtpVerified", "true");
     setStep("admin");
-    await loadDashboardStats();
   }
 
   async function logout() {
@@ -290,5 +203,5 @@ if (!userPhone) {
     );
   }
 
-  return <Dashboard stats={stats} statsLoading={statsLoading} lastUpdated={lastUpdated} onRefresh={loadDashboardStats} onLogout={logout} />;
+  return <Dashboard onLogout={logout} />;
 }
