@@ -1,0 +1,6 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript');
+const ctx={exports:{}};vm.createContext(ctx);vm.runInContext(ts.transpileModule(fs.readFileSync('lib/market/rates.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,ctx);
+const quote=(code,unit,buy,sell)=>`<Currency Kod="${code}"><Unit>${unit}</Unit><ForexBuying>${buy}</ForexBuying><ForexSelling>${sell}</ForexSelling></Currency>`;
+const xml=`<Tarih_Date Tarih="07.10.2026">${quote('USD',1,40.12,40.24)}${quote('EUR',100,4500,4600)}</Tarih_Date>`;
+test('TCMB displays dated forex buying and selling per one currency unit',()=>{const result=ctx.exports.parseTcmbRates(xml);assert.equal(result.date,'07.10.2026');assert.equal(result.quotes[0].buy,40.12);assert.equal(result.quotes[1].sell,46);});
+test('invalid, missing or zero quotes never become display prices',()=>{for(const value of ['<html>unavailable</html>',xml.replace('<ForexSelling>40.24</ForexSelling>',''),xml.replace('<Unit>1</Unit>','<Unit>0</Unit>'),xml.replace('<ForexBuying>40.12</ForexBuying>','<ForexBuying>NaN</ForexBuying>')])assert.throws(()=>ctx.exports.parseTcmbRates(value));});

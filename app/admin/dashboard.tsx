@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import CurrencyTicker from "./currency-ticker";
 import PendingInvoices from "./pending-invoices";
 import { ArrowDownToLine, ArrowRight, ClipboardList, FileText, LayoutDashboard, LogOut, MessageCircle, Plus, RefreshCw, Send, UserRound, Users, WalletCards, ChartNoAxesCombined, type LucideIcon } from "lucide-react";
 
@@ -34,7 +35,8 @@ export default function Dashboard({ stats, statsLoading, lastUpdated, onRefresh,
         <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700 lg:hidden">Niba Tarım</p><h1 className="mt-1 text-xl font-bold tracking-tight">Genel bakış</h1></div>
         <div className="flex items-center gap-2"><Link href="/admin/profil" prefetch={false} className={`flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium ${focus}`}><UserRound size={17} aria-hidden="true" /><span>Profilim</span></Link><button onClick={onLogout} aria-label="Çıkış yap" className={`flex size-11 items-center justify-center rounded-xl text-slate-500 hover:bg-white lg:hidden ${focus}`}><LogOut size={19} aria-hidden="true" /></button></div>
       </header>
-      <section className="relative mt-6 overflow-hidden rounded-3xl bg-[#164b3b] p-6 text-white sm:p-8 lg:p-10">
+      <CurrencyTicker />
+      <section className="relative mt-4 overflow-hidden rounded-3xl bg-[#164b3b] p-6 text-white sm:p-8 lg:p-10">
         <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-28 size-80 rounded-full border-[40px] border-white/[0.04]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 right-24 size-64 rounded-full border-[35px] border-white/[0.04]" />
         <div className="relative flex flex-col justify-between gap-7 xl:flex-row xl:items-center"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">İşinin başında, her şey elinin altında.</p><h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Kolay gelsin.</h2><p className="mt-3 max-w-lg text-sm leading-6 text-emerald-50/75">Siparişlerini takip et, fiyatlarını paylaş ve müşterilerinle iletişimde kal.</p></div><Link href="/admin/siparisler/yeni-siparis" prefetch={false} className={`inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-emerald-900 transition hover:bg-emerald-50 ${focus}`}><Plus size={19} aria-hidden="true" />Yeni sipariş oluştur</Link></div>
