@@ -21,6 +21,12 @@ export default function SiparisDetayPage() {
 
   const [purchaseInvoices, setPurchaseInvoices] = useState<any[]>([]);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
+  const [nextInvoicePage, setNextInvoicePage] = useState<number | null>(null);
+  const [invoiceError, setInvoiceError] = useState("");
+  const [openInvoiceDetails, setOpenInvoiceDetails] = useState<Record<string, boolean>>({});
+  const [invoiceDetails, setInvoiceDetails] = useState<Record<string, any>>({});
+  const [detailLoading, setDetailLoading] = useState("");
+  const [detailError, setDetailError] = useState<Record<string, string>>({});
   const [matchingInvoice, setMatchingInvoice] = useState(false);
 
   const [contacts, setContacts] = useState<any[]>([]);
@@ -56,17 +62,19 @@ export default function SiparisDetayPage() {
     }
   }
 
-  async function loadPurchaseInvoices() {
+  async function loadPurchaseInvoices(page = 1) {
     try {
       setLoadingInvoices(true);
+      setInvoiceError("");
 
-      const res = await fetch("/api/admin/parasut/gelen-faturalar", {
+      const res = await fetch(`/api/admin/parasut/gelen-faturalar?page=${page}`, {
         cache: "no-store",
       });
 
       const data = await res.json().catch(() => null);
 
       if (!res.ok || !data?.success) {
+        setInvoiceError("Gelen faturalar alınamadı. Yeniden deneyin.");
         setPurchaseInvoices([]);
         return;
       }
@@ -79,8 +87,13 @@ export default function SiparisDetayPage() {
         data.purchaseInvoices ||
         [];
 
-      setPurchaseInvoices(Array.isArray(rawInvoices) ? rawInvoices : []);
+      setPurchaseInvoices(previous => {
+        const incoming = Array.isArray(rawInvoices) ? rawInvoices : [];
+        return page === 1 ? incoming : [...previous, ...incoming.filter((row: any) => !previous.some(old => String(old.id) === String(row.id)))];
+      });
+      setNextInvoicePage(data.nextPage ?? null);
     } catch {
+      setInvoiceError("Gelen faturalar yüklenemedi.");
       setPurchaseInvoices([]);
     } finally {
       setLoadingInvoices(false);
@@ -153,6 +166,20 @@ export default function SiparisDetayPage() {
     }
   }
 
+  async function loadInvoiceDetail(invoice: any) {
+    const id = String(invoice.id);
+    if (invoiceDetails[id] || detailLoading) return;
+    setDetailLoading(id);
+    setDetailError(previous => ({ ...previous, [id]: "" }));
+    try {
+      const response = await fetch(`/api/admin/parasut/gelen-faturalar?id=${encodeURIComponent(id)}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || "Fatura detayı alınamadı.");
+      setInvoiceDetails(previous => ({ ...previous, [id]: data.invoice }));
+    } catch (error: any) { setDetailError(previous => ({ ...previous, [id]: error.message })); }
+    finally { setDetailLoading(""); }
+  }
+
   async function matchInvoice(invoice: any) {
     if (!siparis?.id) return;
     if (matchingInvoice) return;
@@ -166,8 +193,14 @@ export default function SiparisDetayPage() {
       (c) => String(c.id) === String(selectedSupplierId)
     );
 
+    const taxNo = getInvoiceSupplierTaxNo(invoice);
+    if (!taxNo || taxNo !== getContactTaxNo(selectedContact)) {
+      alert("Faturanın VKN/TCKN bilgisi seçili cari ile birebir eşleşmiyor. Cari kartı kontrol edin."); return;
+    }
+    const detail = invoiceDetails[String(invoice.id)];
+    if (!detail) { alert("Önce fatura detayını açıp kontrol edin."); return; }
     const confirmText = selectedContact
-      ? `${getContactName(selectedContact)} cari kartına gider kaydı atılacak. Onaylıyor musun?`
+      ? `${getContactName(selectedContact)}\nFatura: ${getInvoiceNo(invoice)}\nFatura tutarı: ${formatInvoiceMoney(detail.net_total, detail.currency)}\nSiparişten beklenen: ${formatMoney(calc.toplamAlisTutari)}\nFatura kalemlerini ve tutarı kontrol ettiniz mi? Giderleştirmeyi onaylıyor musunuz?`
       : "Seçilen cari karta gider kaydı atılacak. Onaylıyor musun?";
 
     if (!window.confirm(confirmText)) return;
@@ -217,6 +250,7 @@ export default function SiparisDetayPage() {
   }
 
   useEffect(() => {
+    setSelectedSupplierId(""); setSupplierSearch(""); setInvoiceDetails({});
     if (routeId) loadOrder();
   }, [routeId]);
 
@@ -255,51 +289,20 @@ export default function SiparisDetayPage() {
   const status = getInvoiceStatus(siparis);
 
   const bestMatch = useMemo(() => {
-    if (!contacts.length || !purchaseInvoices.length) return null;
-
-    for (const invoice of purchaseInvoices) {
-      const invoiceVkn = getInvoiceSupplierTaxNo(invoice);
-      if (!invoiceVkn) continue;
-
-      const matchedContact = contacts.find((contact) => {
-        const contactVkn = getContactTaxNo(contact);
-        return contactVkn && contactVkn === invoiceVkn;
-      });
-
-      if (matchedContact) {
-        return {
-          contact: matchedContact,
-          invoice,
-          score: 100,
-          reason: "VKN birebir eşleşti",
-        };
-      }
-    }
-
-    let best: any = null;
-
-    for (const invoice of purchaseInvoices) {
-      const match = findBestContactMatch(siparis, invoice, contacts);
-
-      if (match && (!best || match.score > best.score)) {
-        best = {
-          ...match,
-          invoice,
-        };
-      }
-    }
-
-    return best;
+    const supplier = normalizeText(siparis?.tedarikciler);
+    if (!supplier) return null;
+    const candidates = contacts.map(contact => {
+      const name = normalizeText(getContactName(contact));
+      const score = name === supplier ? 100 : name.includes(supplier) || supplier.includes(name) ? 88 : similarityScore(supplier, name);
+      return { contact, score, reason: "Sipariş tedarikçisi ile isim eşleşmesi" };
+    }).filter(candidate => candidate.score >= 60).sort((a,b) => b.score - a.score);
+    if (!candidates.length || candidates[1]?.score === candidates[0].score) return null;
+    return candidates[0];
   }, [siparis, purchaseInvoices, contacts]);
 
   useEffect(() => {
     if (selectedSupplierId) return;
 
-    if (bestMatch?.contact?.id) {
-      setSelectedSupplierId(String(bestMatch.contact.id));
-      setSupplierSearch(getContactName(bestMatch.contact));
-      return;
-    }
 
     if (siparis?.tedarikciler && !supplierSearch) {
       setSupplierSearch(siparis.tedarikciler);
@@ -318,7 +321,7 @@ export default function SiparisDetayPage() {
         );
         const qWords = q.split(" ").filter((x) => x.length > 1);
 
-        return text.includes(q) || qWords.some((w) => text.includes(w));
+        return text.includes(q) || qWords.every((w) => text.includes(w));
       })
       .slice(0, 80);
   }, [contacts, supplierSearch]);
@@ -334,6 +337,7 @@ export default function SiparisDetayPage() {
         const contactName = normalizeText(getContactName(selectedContact));
         const contactTaxNo = getContactTaxNo(selectedContact);
 
+        if (invoiceTaxNo && contactTaxNo) return invoiceTaxNo === contactTaxNo;
         return (
           (invoiceTaxNo && contactTaxNo && invoiceTaxNo === contactTaxNo) ||
           (invoiceSupplier && contactName && invoiceSupplier.includes(contactName)) ||
@@ -414,6 +418,10 @@ export default function SiparisDetayPage() {
             <div className="mt-4 flex flex-wrap gap-2">{[[status.sevkOk, 'Sevk'], [status.gtsOk, 'GTS'], [status.alisOk, 'Alış faturası']].map(([ok, label]) => <span key={String(label)} className={`rounded-full px-3 py-2 text-xs font-bold ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>{String(label)}: {ok ? 'Tamam' : 'Bekliyor'}</span>)}</div>
             {siparis.sales_invoice_id || siparis.sales_invoice_no ? <p className="mt-4 font-bold text-emerald-800">Satış faturası oluşturuldu: {siparis.sales_invoice_no || siparis.sales_invoice_id}</p> : status.canInvoice ? <Link href={`/admin/siparisler/fatura-kes?siparisId=${encodeURIComponent(String(siparis.id))}`} prefetch={false} className="mt-4 inline-flex rounded-xl bg-emerald-700 px-5 py-3 font-bold text-white">Paraşüt’te satış faturası kes →</Link> : <p className="mt-4 text-sm text-slate-500">Satış faturası için sevk, GTS ve alış faturası kontrollerini tamamla.</p>}
           </section>
+          <section className="grid gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 sm:grid-cols-2">
+            <div><p className="text-sm font-bold text-emerald-800">Beklenen alış faturası tutarı</p><p className="mt-2 text-2xl font-black">{formatMoney(calc.toplamAlisTutari)}</p><p className="mt-1 text-sm text-slate-600">{formatNumber(calc.siparisTonaj)} ton × {formatMoney(calc.alisFiyati)} / ton · Siparişte kayıtlı alış tutarı</p></div>
+            <div><p className="text-sm font-bold text-emerald-800">Beklenen satış faturası tutarı</p><p className="mt-2 text-2xl font-black">{formatMoney(calc.bayiSatisToplam)}</p><p className="mt-1 text-sm text-slate-600">Siparişte kayıtlı satış tutarı. KDV ve sevk miktarını fatura kalemleriyle kontrol edin.</p></div>
+          </section>
           <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
             <div className="min-w-0">
             <section className="rounded-[30px] bg-white p-5 shadow-sm ring-1 ring-slate-100">
@@ -446,7 +454,7 @@ export default function SiparisDetayPage() {
                     {getContactName(bestMatch.contact)}
                   </p>
                   <p className="mt-1 text-xs font-semibold text-emerald-800">
-                    VKN/TCKN: {getContactTaxNo(bestMatch.contact) || "-"} · Skor: %{bestMatch.score}
+                    {bestMatch.reason} · Benzerlik: %{bestMatch.score}<br />VKN/TCKN: {getContactTaxNo(bestMatch.contact) || "-"}
                   </p>
 
                   <button
@@ -489,6 +497,7 @@ export default function SiparisDetayPage() {
                 >
                   <option value="">Cari kart seç</option>
 
+                  {selectedContact && !searchedContacts.some(c => String(c.id) === String(selectedContact.id)) && <option value={selectedContact.id}>{getContactName(selectedContact)}</option>}
                   {searchedContacts.map((c) => (
                     <option key={c.id} value={c.id}>
                       {getContactName(c)} {getContactTaxNo(c) ? `- ${getContactTaxNo(c)}` : ""}
@@ -522,11 +531,12 @@ export default function SiparisDetayPage() {
                     {siparis.matched_purchase_invoice_no}
                   </p>
                   <p className="mt-1 text-xs font-semibold text-emerald-800">
-                    {formatMoney(siparis.matched_purchase_invoice_total)}
+                    {siparis.matched_purchase_invoice_total == null ? "Tutar bilgisi kayıtlı değil" : formatMoney(siparis.matched_purchase_invoice_total)}
                   </p>
                 </div>
               )}
 
+              {invoiceError && <div role="alert" className="mb-4 rounded-xl bg-red-50 p-4 text-red-700">{invoiceError} <button type="button" onClick={() => loadPurchaseInvoices()} className="underline">Yeniden dene</button></div>}
               {loadingInvoices ? (
                 <EmptyBox text="Faturalar yükleniyor..." />
               ) : !selectedContact ? (
@@ -535,11 +545,14 @@ export default function SiparisDetayPage() {
                 <EmptyBox text="Seçili cariye ait gelen e-fatura bulunamadı." />
               ) : (
                 <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
-                  {filteredInvoices.slice(0, 30).map((invoice) => {
+                  {filteredInvoices.map((invoice) => {
                     const invoiceNo = getInvoiceNo(invoice);
                     const supplier = getInvoiceSupplierName(invoice);
                     const vkn = getInvoiceSupplierTaxNo(invoice);
-                    const total = getInvoiceTotal(invoice);
+                    const detail = invoiceDetails[String(invoice.id)];
+                    const total = detail?.net_total ?? getInvoiceTotal(invoice);
+                    const currency = detail?.currency || invoice.attributes?.currency || "TRL";
+                    const taxMatches = Boolean(vkn && vkn === getContactTaxNo(selectedContact));
                     const rowMatch = findBestContactMatch(siparis, invoice, contacts);
 
                     return (
@@ -568,14 +581,29 @@ export default function SiparisDetayPage() {
 
                           <div className="text-right">
                             <p className="text-sm font-black text-emerald-700">
-                              {formatMoney(total)}
+                              {total === null ? "Tutar için detayı açın" : formatInvoiceMoney(total, currency)}
                             </p>
                           </div>
                         </div>
 
+                        <p className="mt-3 text-sm text-slate-600">Fatura tarihi: {formatDate(detail?.issue_date || invoice.attributes?.issue_date)}</p>
+                        <p className={`mt-2 text-sm font-bold ${taxMatches ? "text-emerald-700" : "text-amber-800"}`}>{taxMatches ? "VKN/TCKN seçili cariyle birebir eşleşiyor" : "VKN/TCKN doğrulanamadı; giderleştirme kapalı"}</p>
+                        <div className="mt-4">
+                          <button type="button" aria-expanded={Boolean(openInvoiceDetails[String(invoice.id)])} onClick={() => { setOpenInvoiceDetails(previous => ({ ...previous, [String(invoice.id)]: !previous[String(invoice.id)] })); void loadInvoiceDetail(invoice); }} className="cursor-pointer text-sm font-bold text-emerald-800">Fatura detayını göster / kontrol et</button>
+                          {openInvoiceDetails[String(invoice.id)] && <div>
+                          {detailLoading === String(invoice.id) && <p className="mt-3 text-sm">Detaylar yükleniyor…</p>}
+                          {detailError[String(invoice.id)] && <p role="alert" className="mt-3 text-sm text-red-700">{detailError[String(invoice.id)]} <button type="button" onClick={() => loadInvoiceDetail(invoice)} className="underline">Yeniden dene</button></p>}
+                          {detail && <div className="mt-3 space-y-3">
+                            <p className="text-sm">Ara toplam: {formatInvoiceMoney(detail.gross_total, currency)} · KDV: {formatInvoiceMoney(detail.total_vat, currency)} · Genel toplam: {formatInvoiceMoney(detail.net_total, currency)}</p>
+                            {detail.net_total != null && (currency === "TRL" || currency === "TRY") && <p className="rounded-xl bg-amber-50 p-3 text-sm font-bold">Sipariş tutarıyla fark: {formatMoney(numberValue(detail.net_total) - calc.toplamAlisTutari)}. Miktar, birim fiyat ve KDV kapsamını kontrol edin.</p>}
+                            <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">Ürün / açıklama</th><th className="p-2">Miktar</th><th className="p-2">Birim fiyat</th><th className="p-2">KDV</th><th className="p-2">Kalem tutarı</th></tr></thead><tbody>{detail.details.map((line: any, index: number) => <tr key={index} className="border-t border-slate-200"><td className="p-2">{line.product_mapping_name || line.description || "—"}</td><td className="p-2">{formatNumber(line.quantity)} {line.unit || line.unit_name || line.unit_code || ""}</td><td className="p-2">{formatInvoiceMoney(line.unit_price, currency)}</td><td className="p-2">%{formatNumber(line.vat_rate)}</td><td className="p-2">{formatInvoiceMoney(line.net_total, currency)}</td></tr>)}</tbody></table></div>
+                            {!detail.details.length && <p className="text-sm text-amber-800">Fatura kalemleri alınamadı; giderleştirme kapalı.</p>}
+                          </div>}
+                          </div>}
+                        </div>
                         <button
                           type="button"
-                          disabled={matchingInvoice || !selectedSupplierId}
+                          disabled={matchingInvoice || !selectedSupplierId || !taxMatches || !detail?.details?.length || detail?.net_total == null}
                           onClick={() => matchInvoice(invoice)}
                           className={`mt-4 w-full rounded-xl px-4 py-3 text-xs font-black transition ${
                             selectedSupplierId
@@ -594,6 +622,7 @@ export default function SiparisDetayPage() {
                   })}
                 </div>
               )}
+              {nextInvoicePage && <button type="button" disabled={loadingInvoices} onClick={() => loadPurchaseInvoices(nextInvoicePage)} className="mt-4 w-full rounded-xl border border-emerald-200 p-3 text-sm font-bold text-emerald-800">Daha eski gelen faturaları yükle</button>}
             </Card>
             </div>
           </div>
@@ -761,19 +790,14 @@ function getInvoiceSupplierTaxNo(invoice: any) {
 }
 
 function getInvoiceTotal(invoice: any) {
-  return numberValue(
-    invoice?.remaining ||
-      invoice?.net_total ||
-      invoice?.gross_total ||
-      invoice?.total ||
-      invoice?.total_amount ||
-      invoice?.attributes?.remaining ||
-      invoice?.attributes?.net_total ||
-      invoice?.attributes?.gross_total ||
-      invoice?.attributes?.total ||
-      invoice?.attributes?.total_amount ||
-      0
-  );
+  const value = invoice?.net_total ?? invoice?.total_amount ?? invoice?.attributes?.net_total ?? invoice?.attributes?.total_amount;
+  return value == null || value === "" ? null : numberValue(value);
+}
+
+function formatInvoiceMoney(value: any, currency: string) {
+  if (value == null || value === "") return "Bilgi alınamadı";
+  const code = currency === "TRL" ? "TRY" : currency;
+  return new Intl.NumberFormat("tr-TR", { style: "currency", currency: /^[A-Z]{3}$/.test(code) ? code : "TRY" }).format(numberValue(value));
 }
 
 function findBestContactMatch(order: any, invoice: any, contacts: any[]) {

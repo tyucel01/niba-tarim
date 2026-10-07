@@ -213,7 +213,7 @@ async function enrichDetailsWithProducts(
       token,
       companyId,
       productName,
-      vatRate || 20
+      vatRate
     );
 
     nextDetail.relationships = nextDetail.relationships || {};
@@ -265,8 +265,11 @@ async function buildPurchaseBillPayload(
 
  const quantity = toNumber(d.quantity || 1);
 const unitPrice = toNumber(d.unit_price || 0);
-const vatRate = toNumber(d.vat_rate || 0);
-const netTotal = quantity * unitPrice;
+if (d.vat_rate == null || d.vat_rate === "" || !Number.isFinite(Number(d.vat_rate))) throw new Error("Fatura kaleminde KDV oranı eksik/geçersiz.");
+const vatRate = toNumber(d.vat_rate);
+const baseTotal = quantity * unitPrice;
+const discountValue = toNumber(d.discount_value ?? 0);
+const netTotal = baseTotal - (d.discount_type === "percentage" ? baseTotal * discountValue / 100 : discountValue);
 
 let unit = "Adet";
 
@@ -318,8 +321,8 @@ attributes: {
         detail_no: null,
         description: productName,
         net_total: netTotal.toFixed(2),
-        discount_value: "0.00",
-        discount_rate: 0,
+        discount_value: discountValue.toFixed(2),
+        discount_rate: d.discount_type === "percentage" ? discountValue : 0,
         vat_rate: vatRate.toFixed(2),
         excise_duty_value: "0.00",
         excise_duty_rate: 0,
@@ -368,9 +371,9 @@ attributes: {
     };
   });
 
-  const grossTotal = toNumber(attr.net_total || 0);
+  const grossTotal = toNumber(attr.gross_total ?? (toNumber(attr.net_total) - toNumber(attr.total_vat)));
   const totalVat = toNumber(attr.total_vat || 0);
-  const netTotal = grossTotal;
+  const netTotal = toNumber(attr.net_total ?? (grossTotal + totalVat));
 
   return {
     data: {
@@ -557,6 +560,16 @@ if (existingOrder?.matched_purchase_invoice_id) {
 }
 
     const token = await getAccessToken();
+
+    const identityResponses = await Promise.all([
+      fetch(`${BASE_URL}/v4/${companyId}/e_invoices/${encodeURIComponent(eInvoiceId)}`, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, cache: "no-store" }),
+      fetch(`${BASE_URL}/v4/${companyId}/contacts/${encodeURIComponent(supplierId)}`, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, cache: "no-store" }),
+    ]);
+    if (identityResponses.some(response => !response.ok)) return NextResponse.json({ success: false, error: "Fatura ve cari kimliği doğrulanamadı. İşlem yapılmadı." }, { status: 422 });
+    const [invoiceIdentity, supplierIdentity] = await Promise.all(identityResponses.map(response => response.json()));
+    const invoiceTax = clean(invoiceIdentity.data?.attributes?.from_vkn).replace(/\D/g, "");
+    const supplierTax = clean(supplierIdentity.data?.attributes?.tax_number).replace(/\D/g, "");
+    if (!invoiceTax || !supplierTax || invoiceTax !== supplierTax) return NextResponse.json({ success: false, error: "Fatura VKN/TCKN bilgisi seçili cariyle eşleşmiyor. İşlem yapılmadı." }, { status: 422 });
 
     // 1) E-FATURAYI KABUL ET
     // Daha önce kabul edildiyse hata gelebilir. Bu durumda convert denemeye devam ediyoruz.

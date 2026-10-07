@@ -31,7 +31,7 @@ async function getAccessToken() {
   return data.access_token as string;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const companyId = process.env.PARASUT_COMPANY_ID;
 
@@ -43,8 +43,27 @@ export async function GET() {
     }
 
     const token = await getAccessToken();
+    const id = new URL(req.url).searchParams.get("id");
+    if (id) {
+      const response = await fetch(`${BASE_URL}/v4/${companyId}/e_invoices/${encodeURIComponent(id)}/convert`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, cache: "no-store",
+      });
+      const payload = await response.json();
+      if (!response.ok) return NextResponse.json({ success: false, error: "Paraşüt fatura detayı alınamadı." }, { status: response.status });
+      return NextResponse.json({ success: true, invoice: {
+        ...payload.data?.attributes,
+        gross_total: payload.data?.attributes?.gross_total ?? (payload.data?.attributes?.net_total != null && payload.data?.attributes?.total_vat != null ? Number(payload.data.attributes.net_total) - Number(payload.data.attributes.total_vat) : null),
+        details: (payload.included || []).filter((item: any) => item.type === "e_invoice_preview_detail").map((item: any) => {
+          const attributes = item.attributes || {};
+          const base = Number(attributes.quantity) * Number(attributes.unit_price);
+          const discount = attributes.discount_type === "percentage" ? base * Number(attributes.discount_value || 0) / 100 : Number(attributes.discount_value || 0);
+          return { ...attributes, net_total: attributes.net_total ?? base - discount };
+        }),
+      } });
+    }
 
-    const url = `${BASE_URL}/v4/${companyId}/e_invoices?page[size]=25&scope=importable&sort=-issue_date`;
+    const page = Math.max(1, Number(new URL(req.url).searchParams.get("page")) || 1);
+    const url = `${BASE_URL}/v4/${companyId}/e_invoices?page[number]=${page}&page[size]=25&scope=importable&sort=-issue_date`;
 
     const res = await fetch(url, {
       method: "GET",
@@ -74,8 +93,8 @@ export async function GET() {
         attributes: {
           invoice_no: attr.external_id || item.id,
           issue_date: attr.issue_date || null,
-          net_total: attr.net_total || "0",
-          total_amount: attr.net_total || "0",
+          net_total: attr.net_total ?? null,
+          total_amount: attr.net_total ?? null,
           currency: attr.currency || "TRL",
           status: attr.status || "-",
           response_type: attr.response_type || null,
@@ -98,6 +117,7 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       invoices,
+      nextPage: data.links?.next || Number(data.meta?.total_pages) > page ? page + 1 : null,
       meta: data.meta || null,
       links: data.links || null,
       raw: data,

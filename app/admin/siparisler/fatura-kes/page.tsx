@@ -151,7 +151,10 @@ export default function FaturaKesPage() {
     }
   }
 
+  useEffect(() => { setPreview(null); }, [selectedCustomerId]);
+
   async function createSalesInvoice() {
+    if (!preview || creating) return;
     if (!order?.id) return;
 
     if (!selectedCustomerId) {
@@ -160,7 +163,7 @@ export default function FaturaKesPage() {
     }
 
     const ok = window.confirm(
-      "Bu işlem Paraşüt üzerinde satış faturası oluşturacaktır. Devam etmek istediğine emin misin?"
+      `Müşteri: ${getContactName(selectedCustomer)}\nKDV dahil toplam: ${formatMoney(preview.estimatedTotal)}\n${preview.details.length} kalem için satış faturası oluşturmayı onaylıyor musunuz?`
     );
 
     if (!ok) return;
@@ -179,6 +182,7 @@ export default function FaturaKesPage() {
             siparisId: order.id,
             customerId: selectedCustomerId,
             confirm: true,
+            previewFingerprint: preview.fingerprint,
           }),
         }
       );
@@ -194,6 +198,8 @@ export default function FaturaKesPage() {
         return;
       }
 
+      setPreview(null);
+      setOrder((previous: any) => ({ ...previous, sales_invoice_id: data.salesInvoiceId }));
       alert(
         `✅ Satış faturası oluşturuldu.\n\nFatura ID: ${
           data.salesInvoiceId || "-"
@@ -210,7 +216,7 @@ const selectedCustomer = contacts.find(
   (c) => String(c.id) === String(selectedCustomerId)
 );
 
-console.log("SELECTED CUSTOMER", selectedCustomer);
+
 
   const bestMatch = useMemo(() => {
     if (!order || contacts.length === 0) return null;
@@ -417,7 +423,7 @@ console.log("SELECTED CUSTOMER", selectedCustomer);
             <button
               type="button"
               onClick={createPreview}
-              disabled={creating || !selectedCustomerId}
+              disabled={creating || !selectedCustomerId || Boolean(order.sales_invoice_id)}
               className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white disabled:opacity-50"
             >
               {creating ? "Hazırlanıyor..." : "Önizleme Oluştur"}
@@ -434,10 +440,14 @@ console.log("SELECTED CUSTOMER", selectedCustomer);
                   Alış Faturası: {preview.matchedPurchaseInvoiceNo || "-"}
                 </p>
                 <p className="mt-1 text-xs font-bold text-slate-500">
-                  Tahmini Toplam: {formatMoney(numberValue(preview.estimatedTotal))}
+                  Müşteri carisi: {getContactName(selectedCustomer)} · VKN/TCKN: {getContactTaxNo(selectedCustomer) || "—"}
                 </p>
               </div>
 
+              <div className="grid gap-3 sm:grid-cols-3">
+                {[ ["KDV hariç tutar", preview.subtotal], ["KDV toplamı", preview.vatTotal], ["Ödenecek tutar · KDV dahil", preview.estimatedTotal] ].map(([label, value]) => <div key={String(label)} className="rounded-2xl bg-emerald-50 p-5"><p className="text-sm font-bold text-emerald-800">{label}</p><p className="mt-2 text-2xl font-black text-slate-950">{formatMoney(value)}</p></div>)}
+              </div>
+              <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">{preview.pricingNote}</p>
               <div className="overflow-x-auto rounded-2xl border border-slate-100">
                 <table className="w-full min-w-[760px] text-left text-sm">
                   <thead className="bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-400">
@@ -447,7 +457,7 @@ console.log("SELECTED CUSTOMER", selectedCustomer);
                       <th className="p-3">Miktar</th>
                       <th className="p-3">Birim</th>
                       <th className="p-3">Birim Fiyat</th>
-                      <th className="p-3">KDV</th>
+                      <th className="p-3">KDV oranı</th><th className="p-3">KDV tutarı</th><th className="p-3">KDV dahil toplam</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -468,15 +478,15 @@ console.log("SELECTED CUSTOMER", selectedCustomer);
                         </td>
                         <td className="p-3 font-bold">
                           %{formatNumber(numberValue(d.vat_rate))}
-                        </td>
+                        </td><td className="p-3 font-bold">{formatMoney(d.vat_amount)}</td><td className="p-3 font-bold">{formatMoney(numberValue(d.subtotal) + numberValue(d.vat_amount))}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
 
-              <div className="rounded-2xl bg-red-50 p-4 text-sm font-black text-red-700 ring-1 ring-red-100">
-                Bu işlem Paraşüt üzerinde satış faturası oluşturacaktır. Devam etmeden önce cari kartı, miktarı ve fiyatı kontrol et.
+              <div className="rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-800 ring-1 ring-amber-100">
+                Alış faturasının tüm kalemleri ve KDV oranları aktarıldı. Müşteri, miktar, satış fiyatı ve KDV dahil toplamı kontrol ederek onaylayın.
               </div>
 
               <button

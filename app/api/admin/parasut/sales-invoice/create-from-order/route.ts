@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -223,93 +224,47 @@ function buildSalesInvoicePayload({
       x?.type === "sales_invoice_details"
   );
 
-  const firstDetailRow = details?.[0] || null;
-  const firstDetail = firstDetailRow?.attributes || {};
-
-  const siparisTonaj = toNumber(
-    order.teslimOlanTonaj || order.siparisTonaj || 0
-  );
-
-  const pesinSatisFiyati = toNumber(order.pesinSatisFiyati || 0);
-  const bayiSatisToplam = toNumber(order.bayiSatisToplam || 0);
-
-  let safeTonUnitPrice =
-    siparisTonaj > 0 && bayiSatisToplam > 0
-      ? bayiSatisToplam / siparisTonaj
-      : pesinSatisFiyati;
-
-  // Fazla sıfır koruması: ton fiyatı anormal yüksekse 10'a böl.
-  while (safeTonUnitPrice > 100000) {
-    safeTonUnitPrice = safeTonUnitPrice / 10;
-  }
-
-  const fallbackQuantity =
-    toNumber(order.teslimOlanTonaj) || toNumber(order.siparisTonaj) || 1;
-
-  const quantity = toNumber(firstDetail.quantity) || fallbackQuantity;
-
-  const unit =
-    clean(firstDetail.unit) ||
-    clean(firstDetail.unit_name) ||
-    clean(firstDetail.measurement_unit) ||
-    "kg";
-
-  const realProductName =
-    clean(firstDetail.product_name) ||
-    clean(firstDetail.description) ||
-    clean(order.urun) ||
-    clean(order.marka) ||
-    "Satış Faturası Kalemi";
-
-  const vatRate =
-    firstDetail?.vat_rate !== undefined && firstDetail?.vat_rate !== null
-      ? toNumber(firstDetail.vat_rate)
-      : 0;
-
-  const unitPrice =
-    unit.toLowerCase() === "kg"
-      ? safeTonUnitPrice / 1000
-      : safeTonUnitPrice;
-
-  const firstProductId =
-    firstDetail?.product_id ||
-    firstDetailRow?.relationships?.product?.data?.id ||
-    null;
-
-  const invoiceDetails = [
-    {
-      type: "sales_invoice_details",
-      attributes: {
-        description: realProductName,
-        quantity,
-        unit,
-        unit_price: unitPrice,
-        vat_rate: vatRate,
-        discount_type: "amount",
-        discount_value: 0,
-      },
-      ...(firstProductId
-        ? {
-            relationships: {
-              product: {
-                data: {
-                  id: String(firstProductId),
-                  type: "products",
-                },
-              },
-            },
-          }
-        : {}),
+  if (!details.length) throw new Error("Alış faturası kalemleri alınamadı; satış faturası oluşturulmadı.");
+  const purchaseCurrency = purchaseBill.data?.attributes?.currency || "TRL";
+  if (!["TRL", "TRY"].includes(purchaseCurrency)) throw new Error("Alış faturası döviz cinsinde; TL sipariş fiyatıyla otomatik hesaplanamaz.");
+  const targetTotal = toNumber(order.bayiSatisToplam) || toNumber(order.pesinSatisFiyati) * (toNumber(order.teslimOlanTonaj) || toNumber(order.siparisTonaj));
+  if (!(targetTotal > 0)) throw new Error("KDV dahil satış tutarı geçerli değil.");
+  const sourceLines = details.map((row: any) => {
+    const attr = row.attributes || {};
+    if (attr.vat_rate == null || attr.vat_rate === "" || !Number.isFinite(Number(attr.vat_rate))) throw new Error("Alış faturasında KDV oranı eksik/geçersiz. Sıfır varsayılmadı.");
+    const quantity = toNumber(attr.quantity);
+    const vatRate = toNumber(attr.vat_rate);
+    if (!(quantity > 0) || vatRate < 0 || vatRate > 100) throw new Error("Alış faturasında miktar veya KDV oranı geçersiz.");
+    const net = attr.net_total != null ? toNumber(attr.net_total) : quantity * toNumber(attr.unit_price);
+    if (!(net > 0)) throw new Error("Alış faturası kalem tutarı geçersiz.");
+    if (toNumber(attr.vat_withholding_rate) || toNumber(attr.excise_duty_rate) || toNumber(attr.communications_tax_rate) || toNumber(attr.accommodation_tax_rate)) throw new Error("Ek vergi/tevkifat içeren fatura için otomatik satış hesabı desteklenmiyor; Paraşüt üzerinde kontrol edin.");
+    const productId = row.relationships?.product?.data?.id;
+    const product = included.find((item: any) => item.type === "products" && String(item.id) === String(productId));
+    const unit = clean(attr.unit || attr.unit_name || product?.attributes?.unit);
+    if (!unit) throw new Error("Alış faturasında birim bilgisi eksik.");
+    return { row, quantity, vatRate, net, unit, productId, name: clean(attr.description || product?.attributes?.name || attr.product_name) };
+  });
+  const sourceTotal = sourceLines.reduce((sum: number, line: any) => sum + line.net * (1 + line.vatRate / 100), 0);
+  // Preserve each purchase line's share of the total; the order's selling price is VAT-inclusive.
+  const factor = targetTotal / sourceTotal;
+  const invoiceDetails = sourceLines.map((line: any) => ({
+    type: "sales_invoice_details",
+    attributes: {
+      description: line.name,
+      quantity: line.quantity,
+      unit: line.unit,
+      unit_price: Number((line.net * factor / line.quantity).toFixed(8)),
+      vat_rate: line.vatRate,
+      discount_type: "amount",
+      discount_value: 0,
     },
-  ];
-
-  const previewTotal = invoiceDetails.reduce((sum: number, d: any) => {
-    const q = toNumber(d.attributes.quantity);
-    const price = toNumber(d.attributes.unit_price);
-    const vat = toNumber(d.attributes.vat_rate);
-
-    return sum + q * price * (1 + vat / 100);
-  }, 0);
+    ...(line.productId ? { relationships: { product: { data: { id: String(line.productId), type: "products" } } } } : {}),
+  }));
+  const round = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+  const subtotal = invoiceDetails.reduce((sum: number, line: any) => sum + round(line.attributes.quantity * line.attributes.unit_price), 0);
+  const vatTotal = invoiceDetails.reduce((sum: number, line: any) => sum + round(round(line.attributes.quantity * line.attributes.unit_price) * line.attributes.vat_rate / 100), 0);
+  const previewTotal = round(subtotal + vatTotal);
+  if (Math.abs(previewTotal - targetTotal) > 0.05) throw new Error("Kalem yuvarlamaları sipariş toplamıyla uyuşmuyor. Faturayı Paraşüt üzerinde kontrol edin.");
 
   const payload = {
     data: {
@@ -360,8 +315,16 @@ function buildSalesInvoicePayload({
         unit: d.attributes.unit,
         unit_price: d.attributes.unit_price,
         vat_rate: d.attributes.vat_rate,
+        subtotal: round(d.attributes.quantity * d.attributes.unit_price),
+        vat_amount: round(round(d.attributes.quantity * d.attributes.unit_price) * d.attributes.vat_rate / 100),
+        purchase_unit_price: toNumber(sourceLines[invoiceDetails.indexOf(d)].row.attributes.unit_price),
       })),
       estimatedTotal: previewTotal,
+      subtotal: round(subtotal),
+      vatTotal: round(vatTotal),
+      targetTotal,
+      currency: "TRY",
+      pricingNote: "Sipariş satış fiyatı KDV dahildir. Tüm alış kalemlerinin ürün, miktar, birim ve KDV oranları korunur; satış tutarı alış kalemlerinin KDV dahil tutar paylarına göre dağıtılır.",
     },
   };
 }
@@ -371,11 +334,13 @@ async function createEInvoice({
   companyId,
   salesInvoiceId,
   recipientAlias,
+  hasZeroVat,
 }: {
   token: string;
   companyId: string;
   salesInvoiceId: string;
   recipientAlias: string;
+  hasZeroVat: boolean;
 }) {
   const payload = {
     data: {
@@ -383,9 +348,8 @@ async function createEInvoice({
       type: "e_invoices",
       attributes: {
         vat_withholding_params: [],
-        vat_exemption_reason_code: "326",
-        vat_exemption_reason:
-          "13/ı Gıda, Tarım ve Hayvancılık Bakanlığı Tarafından Tescil Edilmiş Gübrelerin Teslimi",
+        vat_exemption_reason_code: hasZeroVat ? "326" : null,
+        vat_exemption_reason: hasZeroVat ? "13/ı Gıda, Tarım ve Hayvancılık Bakanlığı Tarafından Tescil Edilmiş Gübrelerin Teslimi" : null,
         accommodation_tax_exemption_reason_code: null,
         excise_duty_codes: [],
         scenario: "commercial",
@@ -466,6 +430,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (order.sales_invoice_id) return NextResponse.json({ success: false, error: "Bu sipariş için satış faturası zaten oluşturulmuş." }, { status: 409 });
     const token = await getAccessToken();
 
     const purchaseBill = await parasutGet(
@@ -480,13 +445,15 @@ export async function POST(req: NextRequest) {
       purchaseBill,
     });
 
+    const fingerprint = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+    if (confirm && body.previewFingerprint !== fingerprint) return NextResponse.json({ success: false, error: "Fatura bilgileri önizlemeden sonra değişti. Önizlemeyi yeniden oluşturun." }, { status: 409 });
     if (!confirm) {
       return NextResponse.json({
         success: true,
         mode: "preview",
         message:
           "Önizleme hazır. Resmileştirmeden/oluşturmadan önce kullanıcı onayı gerekiyor.",
-        preview,
+        preview: { ...preview, fingerprint },
       });
     }
 
@@ -574,6 +541,7 @@ console.log("PARASUT_RECIPIENT_ALIAS", recipientAlias);
       companyId,
       salesInvoiceId: String(salesInvoiceId),
       recipientAlias,
+      hasZeroVat: preview.details.some((line: any) => line.vat_rate === 0),
     });
 
     console.log("PARASUT_E_INVOICE_RESPONSE", JSON.stringify(eInvoice, null, 2));
