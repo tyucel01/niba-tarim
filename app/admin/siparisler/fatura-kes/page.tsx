@@ -1,10 +1,12 @@
 "use client";
+import { usePanelDialog } from "@/app/admin/ui/panel-dialog";
 
 import { salesProgress } from "@/lib/orders/sales-progress";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 export default function FaturaKesPage() {
+  const { panelAlert, panelConfirm } = usePanelDialog();
   const [sourceLines, setSourceLines] = useState<any[]>([]);
   const [sourceLineId, setSourceLineId] = useState("");
   const [lineError, setLineError] = useState("");
@@ -61,7 +63,7 @@ export default function FaturaKesPage() {
       const orderData = await orderRes.json();
 
       if (!orderData.success) {
-        alert("Sipariş alınamadı.");
+        await panelAlert("Sipariş alınamadı.");
         return;
       }
 
@@ -108,7 +110,7 @@ export default function FaturaKesPage() {
 
       setContacts(Array.isArray(rawContacts) ? rawContacts : []);
     } catch (err: any) {
-      alert(err?.message || "Veriler alınamadı.");
+      await panelAlert(err?.message || "Veriler alınamadı.");
     } finally {
       setLoading(false);
     }
@@ -131,7 +133,7 @@ export default function FaturaKesPage() {
     if (!order?.id) return;
 
     if (!selectedCustomerId) {
-      alert("Önce Paraşüt müşteri cari kartı seç.");
+      await panelAlert("Önce Paraşüt müşteri cari kartı seç.");
       return;
     }
 
@@ -159,7 +161,7 @@ export default function FaturaKesPage() {
 
       if (!data.success) {
         if (data.salesInvoiceId) { setPreview(null); await loadData(); }
-        alert(
+        await panelAlert(
           typeof data.error === "string"
             ? data.error
             : JSON.stringify(data.error || data, null, 2)
@@ -169,7 +171,7 @@ export default function FaturaKesPage() {
 
       setPreview(data.preview);
     } catch (err: any) {
-      alert(err?.message || "Önizleme oluşturulamadı.");
+      await panelAlert(err?.message || "Önizleme oluşturulamadı.");
     } finally {
       setCreating(false);
     }
@@ -182,11 +184,11 @@ export default function FaturaKesPage() {
     if (!order?.id) return;
 
     if (!selectedCustomerId) {
-      alert("Önce Paraşüt müşteri cari kartı seç.");
+      await panelAlert("Önce Paraşüt müşteri cari kartı seç.");
       return;
     }
 
-    const ok = window.confirm(
+    const ok = await panelConfirm(
       `Müşteri: ${getContactName(selectedCustomer)}\nKesilecek: ${preview.invoiceTons} ton · Kalan: ${preview.remainingTons} ton\nKDV dahil toplam: ${formatMoney(preview.estimatedTotal)}\n${preview.details.length} kalem için satış faturası oluşturmayı onaylıyor musunuz?`
     );
 
@@ -217,7 +219,7 @@ export default function FaturaKesPage() {
 
       if (!data.success) {
         if (data.salesInvoiceId) { setPreview(null); await loadData(); }
-        alert(
+        await panelAlert(
           typeof data.error === "string"
             ? data.error
             : JSON.stringify(data.error || data, null, 2)
@@ -227,13 +229,13 @@ export default function FaturaKesPage() {
 
       setPreview(null);
       await loadData();
-      alert(
+      await panelAlert(
         `✅ Satış faturası oluşturuldu.\n\nFatura ID: ${
           data.salesInvoiceId || "-"
         }\nFatura No: ${data.salesInvoiceNo || "-"}`
       );
     } catch (err: any) {
-      alert(err?.message || "Satış faturası oluşturulamadı.");
+      await panelAlert(err?.message || "Satış faturası oluşturulamadı.");
     } finally {
       setCreating(false);
     }

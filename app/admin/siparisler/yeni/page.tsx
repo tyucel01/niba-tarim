@@ -1,10 +1,12 @@
 "use client";
+import { usePanelDialog } from "@/app/admin/ui/panel-dialog";
 
 import { useEffect, useMemo, useState } from "react";
 
 type OptionKey = "bayiler" | "odemeler" | "depolar" | "urunler";
 
 export default function FormPage() {
+  const { panelAlert, panelConfirm } = usePanelDialog();
   const [form, setForm] = useState({
     bayi: "",
     tarih: "",
@@ -60,7 +62,7 @@ export default function FormPage() {
     const cleanValue = value.trim();
 
     if (!cleanValue) {
-      alert("Boş değer eklenemez.");
+      await panelAlert("Boş değer eklenemez.");
       return;
     }
 
@@ -69,7 +71,7 @@ export default function FormPage() {
     );
 
     if (exists) {
-      alert("Bu kayıt zaten var.");
+      await panelAlert("Bu kayıt zaten var.");
       return;
     }
 
@@ -84,7 +86,7 @@ export default function FormPage() {
     const data = await res.json();
 
     if (!data.success) {
-      alert(data.error || "Kayıt eklenemedi.");
+      await panelAlert(data.error || "Kayıt eklenemedi.");
       return;
     }
 

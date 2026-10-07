@@ -545,8 +545,7 @@ export async function POST(req: NextRequest) {
     const salesInvoiceId = created.data?.data?.id || null;
     const salesInvoiceNo =
       created.data?.data?.attributes?.invoice_no ||
-      created.data?.data?.attributes?.invoice_id ||
-      salesInvoiceId;
+      null;
 
     if (!salesInvoiceId) {
       return NextResponse.json(
@@ -560,7 +559,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { error: recordError } = await supabase.rpc("record_order_sales_part",{p_part_id:reservationId,p_invoice_id:String(salesInvoiceId),p_invoice_no:String(salesInvoiceNo)});
+    const { error: recordError } = await supabase.rpc("record_order_sales_part",{p_part_id:reservationId,p_invoice_id:String(salesInvoiceId),p_invoice_no:salesInvoiceNo ? String(salesInvoiceNo) : null});
     if (recordError) throw new Error("Fatura Paraşüt'te oluşturuldu fakat takip kaydı tamamlanamadı. Yeniden kesmeyin; Paraşüt üzerinde kontrol edin.");
 
     const eInvoice = await createEInvoice({

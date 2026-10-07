@@ -1,3 +1,4 @@
+import { invoicePlates } from "@/lib/parasut/invoice-plates";
 import { cachedIncomingPage } from "@/lib/parasut/incoming-cache";
 import { invoiceAdmin, reusableInvoices } from "@/lib/parasut/invoice-pool";
 import { NextResponse } from "next/server";
@@ -57,12 +58,16 @@ export async function GET(req: Request) {
       if (!response.ok) return NextResponse.json({ success: false, error: "Paraşüt fatura detayı alınamadı." }, { status: response.status });
       return NextResponse.json({ success: true, invoice: {
         ...payload.data?.attributes,
+        description: undefined, notes: undefined, note: undefined,
+        plates: invoicePlates(payload.data?.attributes?.description, payload.data?.attributes?.notes, payload.data?.attributes?.note),
         gross_total: payload.data?.attributes?.gross_total ?? (payload.data?.attributes?.net_total != null && payload.data?.attributes?.total_vat != null ? Number(payload.data.attributes.net_total) - Number(payload.data.attributes.total_vat) : null),
         details: (payload.included || []).filter((item: any) => ["e_invoice_preview_detail", "purchase_bill_details"].includes(item.type)).map((item: any) => {
           const attributes = item.attributes || {};
           const base = Number(attributes.quantity) * Number(attributes.unit_price);
           const discount = attributes.discount_type === "percentage" ? base * Number(attributes.discount_value || 0) / 100 : Number(attributes.discount_value || 0);
-          return { ...attributes, net_total: attributes.net_total ?? base - discount };
+          const productRef = item.relationships?.product?.data;
+          const product = (payload.included || []).find((p: any) => p.type === "products" && String(p.id) === String(productRef?.id));
+          return { ...attributes, description: undefined, notes: undefined, note: undefined, product_name: product?.attributes?.name || attributes.product_mapping_name || attributes.product_name || "Ürün kalemi", plates: invoicePlates(attributes.description, attributes.notes, attributes.note), net_total: attributes.net_total ?? base - discount };
         }),
       } });
     }

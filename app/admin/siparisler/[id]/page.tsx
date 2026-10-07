@@ -1,4 +1,5 @@
 "use client";
+import { usePanelDialog } from "@/app/admin/ui/panel-dialog";
 
 import { salesProgress, purchaseAllocation } from "@/lib/orders/sales-progress";
 import Link from "next/link";
@@ -8,6 +9,7 @@ import SevkForm from "../sevk-form";
 import { orderStage, stageLabels } from "@/lib/orders/workflow";
 
 export default function SiparisDetayPage() {
+  const { panelAlert, panelConfirm } = usePanelDialog();
   const params = useParams();
   const routeId = decodeURIComponent(String(params.id || ""));
 
@@ -178,7 +180,7 @@ export default function SiparisDetayPage() {
     if (matchingInvoice) return;
 
     if (!selectedSupplierId) {
-      alert("Önce cari kart seç veya önerilen cari kartı onayla.");
+      await panelAlert("Önce cari kart seç veya önerilen cari kartı onayla.");
       return;
     }
 
@@ -188,17 +190,17 @@ export default function SiparisDetayPage() {
 
     const taxNo = getInvoiceSupplierTaxNo(invoice);
     if (!taxNo || taxNo !== getContactTaxNo(selectedContact)) {
-      alert("Faturanın VKN/TCKN bilgisi seçili cari ile birebir eşleşmiyor. Cari kartı kontrol edin."); return;
+      await panelAlert("Faturanın VKN/TCKN bilgisi seçili cari ile birebir eşleşmiyor. Cari kartı kontrol edin."); return;
     }
     const detail = invoiceDetails[String(invoice.id)];
-    if (!detail) { alert("Önce fatura detayını açıp kontrol edin."); return; }
+    if (!detail) { await panelAlert("Önce fatura detayını açıp kontrol edin."); return; }
     const available = invoice.remaining_amount ?? detail.net_total;
-    if (numberValue(available) < calc.toplamAlisTutari) { alert("Faturanın kalan tutarı bu sipariş için yetersiz."); return; }
+    if (numberValue(available) < calc.toplamAlisTutari) { await panelAlert("Faturanın kalan tutarı bu sipariş için yetersiz."); return; }
     const confirmText = selectedContact
       ? `${getContactName(selectedContact)}\nFatura: ${getInvoiceNo(invoice)}\nFatura tutarı: ${formatInvoiceMoney(detail.net_total, detail.currency)}\nSiparişten beklenen: ${formatMoney(calc.toplamAlisTutari)}\nBu siparişe ayrılacak: ${formatMoney(calc.toplamAlisTutari)}\nFaturada kalacak: ${formatInvoiceMoney(numberValue(available) - calc.toplamAlisTutari, detail.currency)}\nFatura kalemlerini ve tutarı kontrol ettiniz mi? Giderleştirmeyi onaylıyor musunuz?`
       : "Seçilen cari karta gider kaydı atılacak. Onaylıyor musun?";
 
-    if (!window.confirm(confirmText)) return;
+    if (!(await panelConfirm(confirmText))) return;
 
     try {
       setMatchingInvoice(true);
@@ -218,7 +220,7 @@ export default function SiparisDetayPage() {
       const data = await res.json();
 
       if (!data.success) {
-        alert(
+        await panelAlert(
           data.step
             ? `${data.step} aşamasında hata: ${data.message || JSON.stringify(data.error)}`
             : data.error || "Fatura giderleştirme başarısız."
@@ -233,13 +235,13 @@ export default function SiparisDetayPage() {
       }
 
       await loadPurchaseInvoices();
-      alert(
+      await panelAlert(
         `✅ Fatura giderlere kaydedildi ve siparişle eşleştirildi.\n\nGider ID: ${
           data.purchaseBillId || "-"
         }\nFatura No: ${data.purchaseBillNo || "-"}\nBu siparişe ayrılan: ${formatMoney(data.allocatedAmount)}\nFaturada kalan: ${formatMoney(data.remainingAmount)}`
       );
     } catch (err: any) {
-      alert(err?.message || "Hata oluştu.");
+      await panelAlert(err?.message || "Hata oluştu.");
     } finally {
       setMatchingInvoice(false);
     }
@@ -603,7 +605,7 @@ export default function SiparisDetayPage() {
                           {detail && <div className="mt-3 space-y-3">
                             <p className="text-sm">Ara toplam: {formatInvoiceMoney(detail.gross_total, currency)} · KDV: {formatInvoiceMoney(detail.total_vat, currency)} · Genel toplam: {formatInvoiceMoney(detail.net_total, currency)}</p>
                             {detail.net_total != null && (currency === "TRL" || currency === "TRY") && <p className="rounded-xl bg-amber-50 p-3 text-sm font-bold">Sipariş tutarıyla fark: {formatMoney(numberValue(detail.net_total) - calc.toplamAlisTutari)}. Miktar, birim fiyat ve KDV kapsamını kontrol edin.</p>}
-                            <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">Ürün / açıklama</th><th className="p-2">Miktar</th><th className="p-2">Birim fiyat</th><th className="p-2">KDV</th><th className="p-2">Kalem tutarı</th></tr></thead><tbody>{detail.details.map((line: any, index: number) => <tr key={index} className="border-t border-slate-200"><td className="p-2">{line.product_mapping_name || line.description || "—"}</td><td className="p-2">{formatNumber(line.quantity)} {line.unit || line.unit_name || line.unit_code || ""}</td><td className="p-2">{formatInvoiceMoney(line.unit_price, currency)}</td><td className="p-2">%{formatNumber(line.vat_rate)}</td><td className="p-2">{formatInvoiceMoney(line.net_total, currency)}</td></tr>)}</tbody></table></div>
+                            {detail.plates?.length > 0 && <p className="rounded-xl bg-white p-3 text-sm font-bold text-slate-800">Fatura plakası: {detail.plates.join(" · ")}</p>}<div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">Ürün / açıklama</th><th className="p-2">Miktar</th><th className="p-2">Birim fiyat</th><th className="p-2">KDV</th><th className="p-2">Kalem tutarı</th></tr></thead><tbody>{detail.details.map((line: any, index: number) => <tr key={index} className="border-t border-slate-200"><td className="p-2"><p>{line.product_mapping_name || line.product_name || "Ürün kalemi"}</p>{line.plates?.length > 0 && <p className="mt-1 text-xs font-semibold text-slate-600">Plaka: {line.plates.join(" · ")}</p>}</td><td className="p-2">{formatNumber(line.quantity)} {line.unit || line.unit_name || line.unit_code || ""}</td><td className="p-2">{formatInvoiceMoney(line.unit_price, currency)}</td><td className="p-2">%{formatNumber(line.vat_rate)}</td><td className="p-2">{formatInvoiceMoney(line.net_total, currency)}</td></tr>)}</tbody></table></div>
                             {!detail.details.length && <p className="text-sm text-amber-800">Fatura kalemleri alınamadı; giderleştirme kapalı.</p>}
                           </div>}
                           </div>}

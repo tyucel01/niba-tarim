@@ -1,4 +1,5 @@
 "use client";
+import { usePanelDialog } from "@/app/admin/ui/panel-dialog";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -83,6 +84,7 @@ const selectOptions: Partial<Record<keyof FormState, string[]>> = {
 };
 
 export default function SiparislerPage() {
+  const { panelAlert, panelConfirm } = usePanelDialog();
   const [form, setForm] = useState<FormState>(initialForm);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -289,13 +291,15 @@ function update(name: keyof FormState, value: string) {
       const { error } = await supabase.from("siparisler").insert([payload]);
 
       if (error) {
-        setMessage("❌ Sipariş kaydedilemedi: " + error.message);
+        setMessage("Sipariş kaydedilemedi: " + error.message);
+        await panelAlert("Sipariş kaydedilemedi: " + error.message);
         return;
       }
 
       suggestionFields.forEach((field) => saveSuggestion(field, form[field]));
 
-      setMessage("✅ Sipariş başarıyla kaydedildi.");
+      setMessage("Sipariş başarıyla kaydedildi.");
+      await panelAlert("Sipariş başarıyla kaydedildi.");
 
       setForm({
         ...initialForm,

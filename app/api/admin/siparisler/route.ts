@@ -1,3 +1,4 @@
+import { syncSalesNumbers } from "@/lib/parasut/sales-numbers";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -26,6 +27,7 @@ export async function GET() {
       );
     }
 
+    await syncSalesNumbers(data || []);
     return NextResponse.json({
       success: true,
       rows: data || [],

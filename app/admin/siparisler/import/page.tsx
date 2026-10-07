@@ -1,16 +1,18 @@
 "use client";
+import { usePanelDialog } from "@/app/admin/ui/panel-dialog";
 
 import Link from "next/link";
 import { useState } from "react";
 
 export default function SiparisImportPage() {
+  const { panelAlert, panelConfirm } = usePanelDialog();
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
 
   async function handleImport() {
     if (!file) {
-      alert("Lütfen Excel veya CSV dosyası seçin.");
+      await panelAlert("Lütfen Excel veya CSV dosyası seçin.");
       return;
     }
 
