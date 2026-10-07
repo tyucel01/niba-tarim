@@ -37,6 +37,10 @@ export function validateValues(input: unknown): SheetValues {
   }
   if (typeof out.satisId !== "string" || !out.satisId || out.satisId.length > 100) throw new Error("Satış ID zorunlu ve değişmez olmalı.");
   if (out.sevkDurumu && !["Bekliyor", "Kısmi Sevk", "Sevk Edildi", "Tamamlandı", "İptal"].includes(String(out.sevkDurumu))) throw new Error("Sevk durumu tanınmıyor.");
+  if (typeof out.gts === "string") {
+    const gtsKey = out.gts.normalize("NFKC").toLocaleLowerCase("tr-TR").replace(/[^a-z0-9]/g, "");
+    if (/e+[vw]+e*[td]+/.test(gtsKey)) out.gts = "Girildi";
+  }
   if (out.gts && !["Yok", "Bekliyor", "Girildi"].includes(String(out.gts))) throw new Error("GTS durumu tanınmıyor.");
   return out;
 }

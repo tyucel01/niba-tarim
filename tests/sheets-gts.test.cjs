@@ -1,0 +1,4 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript');
+const ctx={exports:{},require};vm.createContext(ctx);vm.runInContext(ts.transpileModule(fs.readFileSync('lib/orders/sheets.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,ctx);
+test('GTS recognizes mixed case Evet and Evt with numeric or text suffixes',()=>{for(const gts of ['Evet 2','EVET','eVeT','evt','EVT 2','GTS Evet 2','evt / ikinci araç','Ewet 2','evett','e v e t','evettt','eved 2'])assert.equal(ctx.exports.validateValues({satisId:'test',gts}).gts,'Girildi');});
+test('unrelated GTS states remain unchanged and unknown values remain rejected',()=>{for(const gts of ['Girildi','Yok','Bekliyor'])assert.equal(ctx.exports.validateValues({satisId:'test',gts}).gts,gts);assert.throws(()=>ctx.exports.validateValues({satisId:'test',gts:'belirsiz'}),/GTS/);});
