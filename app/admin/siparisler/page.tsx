@@ -1,5 +1,6 @@
 "use client";
 
+import { salesProgress, deliveryTotals, purchaseAllocation } from "@/lib/orders/sales-progress";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
@@ -65,7 +66,7 @@ export default function SiparislerPage() {
   }, [filtered, page]);
 
   const totalPages = Math.max(Math.ceil(filtered.length / pageSize), 1);
-  const counts = siparisler.reduce<Record<OrderStage, number>>((acc, s) => { acc[orderStage(s)]++; return acc; }, {sevk: 0, fatura: 0, done: 0, cancelled: 0});
+  const counts = siparisler.reduce<Record<OrderStage, number>>((acc, s) => { acc[orderStage(s)]++; return acc; }, {sevk: 0, fatura: 0, partial: 0, done: 0, cancelled: 0});
   return (
     <main className="min-h-screen bg-[#f5f7f4] p-4 text-slate-900 md:p-8">
       <div className="mx-auto max-w-6xl space-y-6">
@@ -82,22 +83,23 @@ export default function SiparislerPage() {
           <div className="space-y-4 border-b border-slate-100 p-4 md:p-5">
             <label className="block"><span className="sr-only">Sipariş ara</span><input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Bayi, tedarikçi, sipariş no, ürün veya plaka ara…" className="min-h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-base outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100" /></label>
             <div className="flex flex-wrap gap-2" aria-label="Sipariş durumu">
-              {(['all', 'sevk', 'fatura', 'done', 'cancelled'] as const).map((value) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => { setFilter(value); setPage(1); }} className={`min-h-11 rounded-lg px-3 text-sm font-semibold ${filter === value ? 'bg-emerald-700 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>{value === 'all' ? 'Tümü' : stageLabels[value]} <span className="ml-1 opacity-70">{value === 'all' ? siparisler.length : counts[value]}</span></button>)}
+              {(['all', 'sevk', 'fatura', 'partial', 'done', 'cancelled'] as const).map((value) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => { setFilter(value); setPage(1); }} className={`min-h-11 rounded-lg px-3 text-sm font-semibold ${filter === value ? 'bg-emerald-700 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>{value === 'all' ? 'Tümü' : stageLabels[value]} <span className="ml-1 opacity-70">{value === 'all' ? siparisler.length : counts[value]}</span></button>)}
             </div>
           </div>
           <div className="hidden grid-cols-[1.4fr_1fr_0.7fr_1.5fr_0.9fr_1.1fr] gap-4 bg-slate-50 px-5 py-3 text-xs font-bold uppercase tracking-wide text-slate-400 lg:grid"><span>Sipariş / Bayi</span><span>Ürün</span><span>Tonaj</span><span>Tedarikçi / Fatura tutarı</span><span>Durum</span><span className="text-right">İşlem</span></div>
           {loading ? <p className="p-10 text-center text-slate-500">Siparişler yükleniyor…</p> : !filtered.length ? <p className="p-10 text-center text-slate-500">Bu görünümde sipariş bulunamadı.</p> : paginated.map((s) => {
             const stage = orderStage(s);
+            const progress = salesProgress(s);
             const id = String(s.id || s.satisId);
             const detail = `/admin/siparisler/${encodeURIComponent(id)}`;
-            const actionHref = `${detail}#${stage === 'fatura' || stage === 'done' ? 'fatura' : 'sevk'}`;
+            const actionHref = `${detail}#${stage === 'fatura' || stage === 'partial' || stage === 'done' ? 'fatura' : 'sevk'}`;
             return <article key={id} className="grid gap-4 border-t border-slate-100 p-5 first:border-t-0 lg:grid-cols-[1.4fr_1fr_0.7fr_1.5fr_0.9fr_1.1fr] lg:items-center">
               <div className="min-w-0"><Link href={`${detail}#satis`} prefetch={false} className="font-bold text-slate-900 hover:text-emerald-700">{String(s.bayi || 'Bayi belirtilmedi')}</Link><p className="mt-1 text-xs text-slate-500">#{String(s.satisId || s.id)} · {formatDate(s.satisTarihi)}</p></div>
               <div className="min-w-0"><p className="font-semibold">{String(s.urun || '—')}</p><p className="mt-1 text-xs text-slate-500">{String(s.marka || '')}{s.plaka ? ` · ${s.plaka}` : ''}</p></div>
-              <div><p className="font-semibold">{formatNumber(numberValue(s.siparisTonaj))} ton</p><p className="mt-1 text-xs text-slate-500">{s.sevkYeri ? String(s.sevkYeri) : 'Sevk yeri bekleniyor'}</p></div>
-              <div className="min-w-0"><p className="text-xs text-slate-500 lg:hidden">Tedarikçi / Fatura tutarı</p><p className="font-semibold">{String(s.tedarikciler || 'Tedarikçi belirtilmedi')}</p><p className="mt-1 font-bold text-emerald-800">{formatNumber(s.matched_purchase_invoice_total != null ? Number(s.matched_purchase_invoice_total) : numberValue(s.tedarikciyeOdenecekTutar) || numberValue(s.alisFiyati) * numberValue(s.siparisTonaj))} TL</p><p className="mt-1 text-xs text-slate-500">{s.matched_purchase_invoice_total != null ? String(s.matched_purchase_invoice_no || 'Alış faturası') : 'Beklenen fatura tutarı'}</p>{s.matched_purchase_allocated_amount != null && Number(s.matched_purchase_allocated_amount) !== Number(s.matched_purchase_invoice_total) && <p className="mt-1 text-xs text-slate-500">Bu siparişe ayrılan: {formatNumber(Number(s.matched_purchase_allocated_amount))} TL</p>}</div>
-              <div><span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-bold ${stage === 'done' ? 'bg-emerald-50 text-emerald-700' : stage === 'fatura' ? 'bg-blue-50 text-blue-700' : stage === 'cancelled' ? 'bg-slate-100 text-slate-500' : 'bg-amber-50 text-amber-800'}`}>{stageLabels[stage]}</span></div>
-              <Link href={actionHref} prefetch={false} className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-center text-sm font-bold text-emerald-800 hover:bg-emerald-100">{stage === 'sevk' ? 'Sevk bilgilerini gir →' : stage === 'fatura' ? 'Faturayı incele →' : 'Siparişi aç →'}</Link>
+              <div><p className="font-semibold">{formatNumber(numberValue(s.teslimOlanTonaj))} ton teslim</p><p className="mt-1 text-xs text-slate-500">Sipariş: {formatNumber(numberValue(s.siparisTonaj))} ton</p><p className="mt-1 text-xs text-slate-500">{s.sevkYeri ? String(s.sevkYeri) : 'Sevk yeri bekleniyor'}</p></div>
+              <div className="min-w-0"><p className="text-xs text-slate-500 lg:hidden">Tedarikçi / Fatura tutarı</p><p className="font-semibold">{String(s.tedarikciler || 'Tedarikçi belirtilmedi')}</p><p className="mt-1 font-bold text-emerald-800">{formatNumber(deliveryTotals(s).purchaseTotal)} TL</p><p className="mt-1 text-xs text-slate-500">Teslim tonajına göre alış tutarı</p>{Boolean(s.matched_purchase_invoice_no) && <p className="mt-1 text-xs text-slate-500">{String(s.matched_purchase_invoice_no)} · Fatura toplamı: {formatNumber(Number(s.matched_purchase_invoice_total))} TL<br />Bu siparişe ayrılan: {formatNumber(purchaseAllocation(s))} TL</p>}</div>
+              <div><span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-bold ${stage === 'done' ? 'bg-emerald-50 text-emerald-700' : stage === 'fatura' || stage === 'partial' ? 'bg-blue-50 text-blue-700' : stage === 'cancelled' ? 'bg-slate-100 text-slate-500' : 'bg-amber-50 text-amber-800'}`}>{stageLabels[stage]}</span>{progress.billedTons>0 && <p className="mt-2 text-xs text-slate-500">Kesilen: {formatNumber(progress.billedTons)} ton · {formatNumber(progress.billedTotal)} TL<br />Kalan: {formatNumber(progress.remainingTons)} ton · {formatNumber(progress.remainingTotal)} TL</p>}</div>
+              <Link href={actionHref} prefetch={false} className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-center text-sm font-bold text-emerald-800 hover:bg-emerald-100">{stage === 'sevk' ? 'Sevk bilgilerini gir →' : stage === 'fatura' || stage === 'partial' ? 'Faturayı incele →' : 'Siparişi aç →'}</Link>
             </article>;
           })}
           {!loading && filtered.length > 0 && <div className="flex items-center justify-between gap-2 border-t border-slate-100 p-4 text-sm"><span className="text-slate-500">{filtered.length} sipariş · {page} / {totalPages}</span><div className="flex gap-2"><button disabled={page <= 1} onClick={() => setPage(p => Math.max(p - 1, 1))} className="min-h-11 rounded-lg bg-slate-100 px-3 disabled:opacity-40">Önceki</button><button disabled={page >= totalPages} onClick={() => setPage(p => Math.min(p + 1, totalPages))} className="min-h-11 rounded-lg bg-slate-100 px-3 disabled:opacity-40">Sonraki</button></div></div>}

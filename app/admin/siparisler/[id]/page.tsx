@@ -1,5 +1,6 @@
 "use client";
 
+import { salesProgress, purchaseAllocation } from "@/lib/orders/sales-progress";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
@@ -269,9 +270,9 @@ export default function SiparisDetayPage() {
     const siparisTonaj = numberValue(siparis?.siparisTonaj);
     const teslimOlanTonaj = numberValue(siparis?.teslimOlanTonaj);
     const bayiSatisToplam =
-      numberValue(siparis?.bayiSatisToplam) || pesinSatisFiyati * siparisTonaj;
+      pesinSatisFiyati * teslimOlanTonaj;
     const toplamAlisTutari =
-      numberValue(siparis?.tedarikciyeOdenecekTutar) || alisFiyati * siparisTonaj;
+      alisFiyati * teslimOlanTonaj;
     const tonBasiKar = pesinSatisFiyati - alisFiyati;
     const toplamKar = bayiSatisToplam - toplamAlisTutari;
     const eksikTonaj = Math.max(siparisTonaj - teslimOlanTonaj, 0);
@@ -419,11 +420,13 @@ export default function SiparisDetayPage() {
         <div hidden={stage !== 'fatura'} className="space-y-5">
           <section className="rounded-2xl border border-slate-200 bg-white p-5"><h2 className="text-xl font-bold">Muhasebe / Fatura işlemleri</h2><p className="mt-2 text-sm text-slate-500">Tedarikçi cari kartını ve alış faturasını kontrol ederek satış faturasına geç.</p>
             <div className="mt-4 flex flex-wrap gap-2">{[[status.sevkOk, 'Sevk'], [status.gtsOk, 'GTS'], [status.alisOk, 'Alış faturası']].map(([ok, label]) => <span key={String(label)} className={`rounded-full px-3 py-2 text-xs font-bold ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>{String(label)}: {ok ? 'Tamam' : 'Bekliyor'}</span>)}</div>
-            {siparis.sales_invoice_id || siparis.sales_invoice_no ? <p className="mt-4 font-bold text-emerald-800">Satış faturası oluşturuldu: {siparis.sales_invoice_no || siparis.sales_invoice_id}</p> : status.canInvoice ? <Link href={`/admin/siparisler/fatura-kes?siparisId=${encodeURIComponent(String(siparis.id))}`} prefetch={false} className="mt-4 inline-flex rounded-xl bg-emerald-700 px-5 py-3 font-bold text-white">Paraşüt’te satış faturası kes →</Link> : <p className="mt-4 text-sm text-slate-500">Satış faturası için sevk, GTS ve alış faturası kontrollerini tamamla.</p>}
+            {salesProgress(siparis).billedTons>0 && <p className="mt-4 font-bold text-emerald-800">{salesProgress(siparis).complete ? "Faturalandı" : "Kısmi faturalandı"} · Kesilen: {formatNumber(salesProgress(siparis).billedTons)} ton / {formatMoney(salesProgress(siparis).billedTotal)} · Kalan: {formatNumber(salesProgress(siparis).remainingTons)} ton / {formatMoney(salesProgress(siparis).remainingTotal)}</p>}
+            {salesProgress(siparis).history.length>0 && <div className="mt-3 space-y-2">{salesProgress(siparis).history.map((row:any)=><p key={row.id} className="rounded-xl bg-slate-50 p-3 text-sm">Fatura: {row.invoice_no || row.id} · {formatNumber(Number(row.tons))} ton · {formatMoney(row.amount)}{['created','needs_review'].includes(row.state) ? " · Resmileştirme kontrolü bekliyor" : ""}</p>)}</div>}
+            {status.canInvoice && (!salesProgress(siparis).complete || salesProgress(siparis).blocked) ? <Link href={`/admin/siparisler/fatura-kes?siparisId=${encodeURIComponent(String(siparis.id))}`} prefetch={false} className="mt-4 inline-flex rounded-xl bg-emerald-700 px-5 py-3 font-bold text-white">{salesProgress(siparis).blocked ? "Fatura takibini aç →" : "Paraşüt’te satış faturası kes →"}</Link> : !salesProgress(siparis).complete && <p className="mt-4 text-sm text-slate-500">Satış faturası için sevk, GTS ve alış faturası kontrollerini tamamla.</p>}
           </section>
           <section className="grid gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-5 sm:grid-cols-2">
-            <div><p className="text-sm font-bold text-emerald-800">Beklenen alış faturası tutarı</p><p className="mt-2 text-2xl font-black">{formatMoney(calc.toplamAlisTutari)}</p><p className="mt-1 text-sm text-slate-600">{formatNumber(calc.siparisTonaj)} ton × {formatMoney(calc.alisFiyati)} / ton · Siparişte kayıtlı alış tutarı</p></div>
-            <div><p className="text-sm font-bold text-emerald-800">Beklenen satış faturası tutarı</p><p className="mt-2 text-2xl font-black">{formatMoney(calc.bayiSatisToplam)}</p><p className="mt-1 text-sm text-slate-600">Siparişte kayıtlı satış tutarı. KDV ve sevk miktarını fatura kalemleriyle kontrol edin.</p></div>
+            <div><p className="text-sm font-bold text-emerald-800">Beklenen alış faturası tutarı</p><p className="mt-2 text-2xl font-black">{formatMoney(calc.toplamAlisTutari)}</p><p className="mt-1 text-sm text-slate-600">{formatNumber(calc.teslimOlanTonaj)} teslim ton × {formatMoney(calc.alisFiyati)} / ton · Teslim olan tonaja göre alış tutarı</p></div>
+            <div><p className="text-sm font-bold text-emerald-800">Beklenen satış faturası tutarı</p><p className="mt-2 text-2xl font-black">{formatMoney(calc.bayiSatisToplam)}</p><p className="mt-1 text-sm text-slate-600">Teslim olan tonaj × KDV dahil satış fiyatı.</p></div>
           </section>
           <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
             <div className="min-w-0">
@@ -535,7 +538,7 @@ export default function SiparisDetayPage() {
                   </p>
                   <p className="mt-1 text-xs font-semibold text-emerald-800">
                     {siparis.matched_purchase_invoice_total == null ? "Tutar bilgisi kayıtlı değil" : `Fatura toplamı: ${formatMoney(siparis.matched_purchase_invoice_total)}`}
-                    {siparis.matched_purchase_allocated_amount != null && <span className="mt-1 block">Bu siparişe ayrılan: {formatMoney(siparis.matched_purchase_allocated_amount)}</span>}
+                    {siparis.matched_purchase_allocated_amount != null && <span className="mt-1 block">Bu siparişe ayrılan: {formatMoney(purchaseAllocation(siparis))}</span>}
                   </p>
                 </div>
               )}
@@ -608,7 +611,7 @@ export default function SiparisDetayPage() {
                         </div>
                         <button
                           type="button"
-                          disabled={matchingInvoice || !selectedSupplierId || !taxMatches || !detail?.details?.length || detail?.net_total == null || (invoice.remaining_amount != null && numberValue(invoice.remaining_amount) < calc.toplamAlisTutari)}
+                          disabled={matchingInvoice || calc.teslimOlanTonaj <= 0 || calc.toplamAlisTutari <= 0 || !selectedSupplierId || !taxMatches || !detail?.details?.length || detail?.net_total == null || (invoice.remaining_amount != null && numberValue(invoice.remaining_amount) < calc.toplamAlisTutari)}
                           onClick={() => matchInvoice(invoice)}
                           className={`mt-4 w-full rounded-xl px-4 py-3 text-xs font-black transition ${
                             selectedSupplierId
@@ -715,7 +718,7 @@ function getInvoiceStatus(s: any) {
     sevkOk,
     gtsOk,
     alisOk,
-    canInvoice: sevkOk && gtsOk && alisOk,
+    canInvoice: sevkOk && gtsOk && alisOk && Number(s?.teslimOlanTonaj) > 0,
   };
 }
 

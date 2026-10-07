@@ -1,3 +1,4 @@
+import { salesPart, purchaseAllocation } from "@/lib/orders/sales-progress";
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -211,10 +212,12 @@ function buildSalesInvoicePayload({
   order,
   customerId,
   purchaseBill,
+  invoiceTons,
 }: {
   order: any;
   customerId: string;
   purchaseBill: any;
+  invoiceTons?: number;
 }) {
   const included = purchaseBill?.included || [];
 
@@ -227,12 +230,13 @@ function buildSalesInvoicePayload({
   if (!details.length) throw new Error("Alış faturası kalemleri alınamadı; satış faturası oluşturulmadı.");
   const purchaseCurrency = purchaseBill.data?.attributes?.currency || "TRL";
   if (!["TRL", "TRY"].includes(purchaseCurrency)) throw new Error("Alış faturası döviz cinsinde; TL sipariş fiyatıyla otomatik hesaplanamaz.");
-  const targetTotal = toNumber(order.bayiSatisToplam) || toNumber(order.pesinSatisFiyati) * (toNumber(order.teslimOlanTonaj) || toNumber(order.siparisTonaj));
+  const part = salesPart(order, invoiceTons);
+  const targetTotal = part.invoiceAmount;
   if (!(targetTotal > 0)) throw new Error("KDV dahil satış tutarı geçerli değil.");
-  const allocated = order.matched_purchase_allocated_amount == null ? null : toNumber(order.matched_purchase_allocated_amount);
+  const allocated = purchaseAllocation(order);
   const purchaseTotal = toNumber(purchaseBill.data?.attributes?.net_total);
-  const share = allocated == null ? 1 : allocated / purchaseTotal;
-  if (!(share > 0) || share > 1 || !Number.isFinite(share)) throw new Error("Siparişe ayrılan fatura tutarı doğrulanamadı.");
+  const sourceShare = allocated / purchaseTotal;
+  if (!(sourceShare > 0) || sourceShare > 1 || !Number.isFinite(sourceShare)) throw new Error("Siparişe ayrılan fatura tutarı doğrulanamadı.");
   const sourceLines = details.map((row: any) => {
     const attr = row.attributes || {};
     if (attr.vat_rate == null || attr.vat_rate === "" || !Number.isFinite(Number(attr.vat_rate))) throw new Error("Alış faturasında KDV oranı eksik/geçersiz. Sıfır varsayılmadı.");
@@ -246,8 +250,14 @@ function buildSalesInvoicePayload({
     const product = included.find((item: any) => item.type === "products" && String(item.id) === String(productId));
     const unit = clean(attr.unit || attr.unit_name || product?.attributes?.unit);
     if (!unit) throw new Error("Alış faturasında birim bilgisi eksik.");
-    return { row, quantity, vatRate, net, unit, productId, name: clean(attr.description || product?.attributes?.name || attr.product_name) };
+    const normalizedUnit = unit.toLocaleLowerCase("tr-TR").replace(/\./g, "");
+    const tons = ["kg","kilogram","kilogramme"].includes(normalizedUnit) ? quantity / 1000 : ["ton","t","tonne","tonnes","mt"].includes(normalizedUnit) ? quantity : 0;
+    if (!(tons > 0)) throw new Error("Alış faturasında kg/ton dışında birim var. Teslim tonajına göre otomatik fatura oluşturulamaz.");
+    return { row, quantity, tons, vatRate, net, unit, productId, name: clean(attr.description || product?.attributes?.name || attr.product_name) };
   });
+  const sourceTons = sourceLines.reduce((sum: number, line: any) => sum + line.tons, 0);
+  if (part.tons > sourceTons + .000001) throw new Error("Alış faturasının ürün miktarı teslim tonajını karşılamıyor. Faturayı kontrol edin.");
+  const share = part.invoiceTons / sourceTons;
   const sourceTotal = sourceLines.reduce((sum: number, line: any) => sum + line.net * (1 + line.vatRate / 100), 0);
   // Preserve each purchase line's share of the total; the order's selling price is VAT-inclusive.
   const factor = targetTotal / sourceTotal;
@@ -327,11 +337,16 @@ function buildSalesInvoicePayload({
       subtotal: round(subtotal),
       vatTotal: round(vatTotal),
       targetTotal,
+      invoiceTons: part.invoiceTons,
+      billedTons: part.billedTons,
+      remainingTons: part.remainingTons - part.invoiceTons,
+      remainingTotal: Math.round((part.remainingTotal - targetTotal) * 100) / 100,
       currency: "TRY",
       allocatedPurchaseAmount: allocated,
       sourcePurchaseTotal: purchaseTotal,
-      sourceShare: share,
-      pricingNote: share < 1 ? "Bu alış faturası birden fazla siparişi kapsıyor. Kalem miktarları siparişe ayrılan alış tutarı oranında paylaştırıldı. Ürünleri ve miktarları kontrol edin; satış fiyatı KDV dahildir." : "Sipariş satış fiyatı KDV dahildir. Alış kalemlerinin ürün, miktar, birim ve KDV oranları korunur; satış tutarı kalemlerin tutar paylarına göre dağıtılır.",
+      sourceShare,
+      partShare: part.partShare,
+      pricingNote: "Kalem miktarları seçilen teslim tonajına göre, ürünlerin alış faturasındaki tonaj payları korunarak hesaplandı. Birim ve KDV oranları korunur; satış fiyatı KDV dahildir. Ürünleri ve miktarları kontrol edin.",
     },
   };
 }
@@ -437,7 +452,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (order.sales_invoice_id) return NextResponse.json({ success: false, error: "Bu sipariş için satış faturası zaten oluşturulmuş." }, { status: 409 });
+    const part = salesPart(order, body.invoiceTons == null ? undefined : Number(body.invoiceTons));
+    if (part.blocked) return NextResponse.json({success:false,error:"Önceki satış faturası resmileştirme kontrolü bekliyor. Paraşüt üzerinde kontrol edin."},{status:409});
     const token = await getAccessToken();
 
     const purchaseBill = await parasutGet(
@@ -450,6 +466,7 @@ export async function POST(req: NextRequest) {
       order,
       customerId,
       purchaseBill,
+      invoiceTons: part.invoiceTons,
     });
 
     const fingerprint = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
@@ -464,6 +481,11 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const { recipientAlias } = await getCustomerRecipientAlias(token, companyId, customerId);
+    if (!recipientAlias) return NextResponse.json({success:false,error:"Müşterinin e-fatura posta kutusu bulunamadı. Fatura oluşturulmadı; cari kartı kontrol edin."},{status:400});
+    const { data: reservationId, error: reserveError } = await supabase.rpc("reserve_order_sales_part", {p_order_id:siparisId,p_tons:part.invoiceTons,p_amount:preview.estimatedTotal,p_customer_id:customerId,p_fingerprint:fingerprint});
+    if (reserveError) return NextResponse.json({success:false,error:reserveError.message},{status:409});
+
     const created = await parasutPost(
       token,
       companyId,
@@ -477,6 +499,7 @@ export async function POST(req: NextRequest) {
     );
 
     if (!created.ok) {
+      if (created.status >= 400 && created.status < 500 && created.status !== 408) await supabase.rpc("finish_order_sales_part",{p_part_id:reservationId,p_state:"failed"});
       return NextResponse.json(
         {
           success: false,
@@ -506,42 +529,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { contactDetail, recipientAlias } = await getCustomerRecipientAlias(
-      
-      token,
-      companyId,
-      customerId
-    );
-    console.log(
-  "PARASUT_CONTACT_DETAIL_FOR_ALIAS",
-  JSON.stringify(contactDetail, null, 2)
-);
-
-console.log("PARASUT_RECIPIENT_ALIAS", recipientAlias);
-
-    if (!recipientAlias) {
-      await supabase
-        .from("siparisler")
-        .update({
-          sales_invoice_id: salesInvoiceId,
-          sales_invoice_no: salesInvoiceNo,
-          sales_invoice_created_at: new Date().toISOString(),
-        })
-        .eq("id", siparisId);
-
-      return NextResponse.json(
-        {
-          success: false,
-          step: "recipient_alias_missing",
-          error:
-            "Satış faturası oluşturuldu fakat müşteri e-fatura alias/posta kutusu bulunamadı. Paraşüt cari kartındaki e-fatura posta kutusunu kontrol et.",
-          salesInvoiceId,
-          salesInvoiceNo,
-          contactDetail,
-        },
-        { status: 400 }
-      );
-    }
+    const { error: recordError } = await supabase.rpc("record_order_sales_part",{p_part_id:reservationId,p_invoice_id:String(salesInvoiceId),p_invoice_no:String(salesInvoiceNo)});
+    if (recordError) throw new Error("Fatura Paraşüt'te oluşturuldu fakat takip kaydı tamamlanamadı. Yeniden kesmeyin; Paraşüt üzerinde kontrol edin.");
 
     const eInvoice = await createEInvoice({
       token,
@@ -554,14 +543,7 @@ console.log("PARASUT_RECIPIENT_ALIAS", recipientAlias);
     console.log("PARASUT_E_INVOICE_RESPONSE", JSON.stringify(eInvoice, null, 2));
 
     if (!eInvoice.ok) {
-      await supabase
-        .from("siparisler")
-        .update({
-          sales_invoice_id: salesInvoiceId,
-          sales_invoice_no: salesInvoiceNo,
-          sales_invoice_created_at: new Date().toISOString(),
-        })
-        .eq("id", siparisId);
+      await supabase.rpc("finish_order_sales_part",{p_part_id:reservationId,p_state:"needs_review"});
 
       return NextResponse.json(
         {
@@ -583,18 +565,14 @@ console.log("PARASUT_RECIPIENT_ALIAS", recipientAlias);
       eInvoice.data?.data?.attributes?.external_id ||
       eInvoiceId;
 
-    await supabase
-      .from("siparisler")
-      .update({
-        sales_invoice_id: salesInvoiceId,
-        sales_invoice_no: salesInvoiceNo,
-        sales_invoice_created_at: new Date().toISOString(),
-      })
-      .eq("id", siparisId);
+    const {error:finishError} = await supabase.rpc("finish_order_sales_part",{p_part_id:reservationId,p_state:"issued"});
+    if (finishError) throw new Error("Fatura oluşturuldu; resmileştirme takip kaydı kontrol bekliyor. Tekrar kesmeyin.");
 
     return NextResponse.json({
       success: true,
       message: "Satış faturası oluşturuldu ve e-fatura resmileştirme başlatıldı.",
+      invoiceTons:part.invoiceTons,
+      remainingTons:part.remainingTons-part.invoiceTons,
       salesInvoiceId,
       salesInvoiceNo,
       eInvoiceId,

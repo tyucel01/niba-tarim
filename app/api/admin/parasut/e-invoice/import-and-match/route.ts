@@ -533,7 +533,7 @@ export async function POST(req: NextRequest) {
     }
     const { data: existingOrder, error: existingOrderError } = await supabase
   .from("siparisler")
-  .select("id, gelenFatura, matched_purchase_invoice_id, matched_purchase_invoice_no,tedarikciyeOdenecekTutar,alisFiyati,siparisTonaj")
+  .select("id, gelenFatura, matched_purchase_invoice_id, matched_purchase_invoice_no,tedarikciyeOdenecekTutar,alisFiyati,teslimOlanTonaj")
   .eq("id", siparisId)
   .single();
 
@@ -559,6 +559,7 @@ if (existingOrder?.matched_purchase_invoice_id) {
   );
 }
 
+    if (!(toNumber(existingOrder?.teslimOlanTonaj)>0) || !(toNumber(existingOrder?.alisFiyati)>0)) return NextResponse.json({success:false,error:"Teslim olan tonaj ve alış fiyatı girilmeden alış faturası eşleştirilemez."},{status:422});
     const token = await getAccessToken();
 
     const { data: storedInvoice, error: storedError } = await supabase.from("purchase_invoice_pool").select("*").eq("e_invoice_id", eInvoiceId).maybeSingle();
@@ -592,7 +593,7 @@ if (existingOrder?.matched_purchase_invoice_id) {
     const previewResponse = await fetch(`${BASE_URL}/v4/${companyId}/e_invoices/${encodeURIComponent(eInvoiceId)}/convert`, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, cache: "no-store" });
     const previewData = await previewResponse.json().catch(() => null);
     const previewTotal = toNumber(previewData?.data?.attributes?.net_total);
-    const expected = toNumber(existingOrder?.tedarikciyeOdenecekTutar) || toNumber(existingOrder?.alisFiyati) * toNumber(existingOrder?.siparisTonaj);
+    const expected = toNumber(existingOrder?.alisFiyati) * toNumber(existingOrder?.teslimOlanTonaj);
     if (!previewResponse.ok || expected <= 0 || previewTotal < expected || !["TRL","TRY"].includes(previewData?.data?.attributes?.currency)) return NextResponse.json({ success: false, error: "Fatura tutarı sipariş alış tutarını karşılamıyor veya TL tutarı doğrulanamadı." }, { status: 422 });
     const { error: reserveError } = await supabase.from("purchase_invoice_pool").insert({ e_invoice_id: eInvoiceId, supplier_id: supplierId, supplier_name: supplierIdentity.data?.attributes?.name, supplier_tax_no: supplierTax, total: previewTotal, currency: previewData.data.attributes.currency });
     if (reserveError) return NextResponse.json({ success: false, error: "Bu fatura için işlem zaten başlatılmış olabilir. Listeyi yenileyin; tekrar gider kaydı oluşturulmadı." }, { status: 409 });

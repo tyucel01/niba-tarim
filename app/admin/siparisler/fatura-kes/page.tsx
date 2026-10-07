@@ -1,9 +1,11 @@
 "use client";
 
+import { salesProgress } from "@/lib/orders/sales-progress";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 export default function FaturaKesPage() {
+  const [invoiceTons, setInvoiceTons] = useState("");
   const [siparisId, setSiparisId] = useState("");
   const [order, setOrder] = useState<any | null>(null);
   const [contacts, setContacts] = useState<any[]>([]);
@@ -67,6 +69,7 @@ export default function FaturaKesPage() {
         );
 
       setOrder(foundOrder || null);
+      if (foundOrder) setInvoiceTons(String(salesProgress(foundOrder).remainingTons));
 
       let contactsRes = await fetch("/api/admin/parasut/contacts", {
         cache: "no-store",
@@ -127,6 +130,7 @@ export default function FaturaKesPage() {
           body: JSON.stringify({
             siparisId: order.id,
             customerId: selectedCustomerId,
+            invoiceTons: Number(invoiceTons.replace(",", ".")),
             confirm: false,
           }),
         }
@@ -135,6 +139,7 @@ export default function FaturaKesPage() {
       const data = await res.json();
 
       if (!data.success) {
+        if (data.salesInvoiceId) { setPreview(null); await loadData(); }
         alert(
           typeof data.error === "string"
             ? data.error
@@ -151,7 +156,7 @@ export default function FaturaKesPage() {
     }
   }
 
-  useEffect(() => { setPreview(null); }, [selectedCustomerId]);
+  useEffect(() => { setPreview(null); }, [selectedCustomerId, invoiceTons]);
 
   async function createSalesInvoice() {
     if (!preview || creating) return;
@@ -163,7 +168,7 @@ export default function FaturaKesPage() {
     }
 
     const ok = window.confirm(
-      `Müşteri: ${getContactName(selectedCustomer)}\nKDV dahil toplam: ${formatMoney(preview.estimatedTotal)}\n${preview.details.length} kalem için satış faturası oluşturmayı onaylıyor musunuz?`
+      `Müşteri: ${getContactName(selectedCustomer)}\nKesilecek: ${preview.invoiceTons} ton · Kalan: ${preview.remainingTons} ton\nKDV dahil toplam: ${formatMoney(preview.estimatedTotal)}\n${preview.details.length} kalem için satış faturası oluşturmayı onaylıyor musunuz?`
     );
 
     if (!ok) return;
@@ -181,6 +186,7 @@ export default function FaturaKesPage() {
           body: JSON.stringify({
             siparisId: order.id,
             customerId: selectedCustomerId,
+            invoiceTons: Number(invoiceTons.replace(",", ".")),
             confirm: true,
             previewFingerprint: preview.fingerprint,
           }),
@@ -190,6 +196,7 @@ export default function FaturaKesPage() {
       const data = await res.json();
 
       if (!data.success) {
+        if (data.salesInvoiceId) { setPreview(null); await loadData(); }
         alert(
           typeof data.error === "string"
             ? data.error
@@ -199,7 +206,7 @@ export default function FaturaKesPage() {
       }
 
       setPreview(null);
-      setOrder((previous: any) => ({ ...previous, sales_invoice_id: data.salesInvoiceId }));
+      await loadData();
       alert(
         `✅ Satış faturası oluşturuldu.\n\nFatura ID: ${
           data.salesInvoiceId || "-"
@@ -212,6 +219,10 @@ export default function FaturaKesPage() {
     }
   }
 
+const progress = order ? salesProgress(order) : null;
+const selectedTons = Number(invoiceTons.replace(",", "."));
+const amountForPart = progress && selectedTons > 0 ? selectedTons === progress.remainingTons ? progress.remainingTotal : Math.round(progress.total * selectedTons / progress.tons * 100) / 100 : 0;
+const invalidPart = !progress || !Number.isFinite(selectedTons) || selectedTons <= 0 || selectedTons > progress.remainingTons || amountForPart > progress.remainingTotal || progress.blocked;
 const selectedCustomer = contacts.find(
   (c) => String(c.id) === String(selectedCustomerId)
 );
@@ -303,17 +314,18 @@ const selectedCustomer = contacts.find(
                 label="Ürün"
                 value={`${order.urun || "-"} ${order.marka ? `/ ${order.marka}` : ""}`}
               />
+              <InfoRow label="Sipariş Tonajı" value={`${formatNumber(numberValue(order.siparisTonaj))} ton`} />
               <InfoRow
-                label="Tonaj"
-                value={`${formatNumber(numberValue(order.siparisTonaj))} ton`}
+                label="Teslim Olan Tonaj"
+                value={`${formatNumber(numberValue(order.teslimOlanTonaj))} ton`}
               />
               <InfoRow
                 label="Satış Fiyatı"
                 value={formatMoney(numberValue(order.pesinSatisFiyati))}
               />
               <InfoRow
-                label="Bayi Satış Toplamı"
-                value={formatMoney(numberValue(order.bayiSatisToplam))}
+                label="Teslime Göre Satış Toplamı"
+                value={formatMoney(progress?.total)}
               />
               <InfoRow
                 label="Eşleşmiş Alış Faturası"
@@ -409,6 +421,12 @@ const selectedCustomer = contacts.find(
           </div>
         </section>
 
+        {progress && <section className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-slate-100">
+          <h2 className="text-xl font-black">{progress.blocked ? "Fatura kontrolü bekliyor" : progress.complete ? "Faturalandı" : progress.billedTons > 0 ? "Kısmi faturalandı" : "Satış faturası kesilecek miktar"}</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">{[["Teslim edilen",progress.tons,progress.total],["Faturalanan",progress.billedTons,progress.billedTotal],["Kalan",progress.remainingTons,progress.remainingTotal]].map(([label,tons,amount])=><div key={String(label)} className="rounded-xl bg-slate-50 p-4"><p className="text-sm font-bold text-slate-500">{label}</p><p className="mt-1 font-black">{formatNumber(Number(tons))} ton · {formatMoney(amount)}</p></div>)}</div>
+          {!progress.complete && <div className="mt-5"><label className="block text-sm font-bold">Bu faturada kesilecek tonaj<input type="number" min="0.000001" max={progress.remainingTons} step="0.000001" value={invoiceTons} onChange={e=>setInvoiceTons(e.target.value)} className="mt-2 block w-full rounded-xl border border-slate-200 px-4 py-3 sm:max-w-xs" /></label><p className="mt-3 font-bold text-emerald-800">Kesilecek tutar (KDV dahil): {formatMoney(amountForPart)}</p><p className="mt-1 text-sm text-slate-500">Tutar siparişin satış fiyatına göre hesaplanır; kalan tonaj ve tutar aşılamaz.</p>{invalidPart && <p role="alert" className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">{progress.blocked ? progress.overbilled ? "Kayıtlı faturalar teslim tonajını veya tutarını aşıyor. Teslim bilgilerini ve mevcut faturaları kontrol edin; yeni fatura oluşturulamaz." : "Önceki faturanın resmileştirmesi kontrol bekliyor. Paraşüt üzerinde kontrol edin; yeniden kesmeyin." : `Kesilecek tonaj 0'dan büyük ve en fazla ${formatNumber(progress.remainingTons)} ton olmalı. Fatura tutarı ${formatMoney(progress.remainingTotal)} sınırını aşamaz.`}</p>}</div>}
+          {progress.history.length>0 && <div className="mt-5 space-y-2"><h3 className="font-bold">Bu siparişin satış faturaları</h3>{progress.history.map((row:any)=><div key={row.id} className="flex flex-wrap justify-between gap-2 rounded-xl border border-slate-100 p-3 text-sm"><span className="font-bold">{row.invoice_no || row.id}</span><span>{formatNumber(Number(row.tons))} ton · {formatMoney(row.amount)}</span><span className={row.state==='needs_review'||row.state==='created' ? "text-amber-800" : "text-emerald-800"}>{row.state==='needs_review'||row.state==='created' ? "Resmileştirme kontrolü bekliyor" : row.state==='legacy' ? "Kayıtlı fatura" : "Resmileştirme başlatıldı"}</span></div>)}</div>}
+        </section>}
         <section className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-slate-100">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -423,7 +441,7 @@ const selectedCustomer = contacts.find(
             <button
               type="button"
               onClick={createPreview}
-              disabled={creating || !selectedCustomerId || Boolean(order.sales_invoice_id)}
+              disabled={creating || !selectedCustomerId || invalidPart}
               className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white disabled:opacity-50"
             >
               {creating ? "Hazırlanıyor..." : "Önizleme Oluştur"}
@@ -447,7 +465,7 @@ const selectedCustomer = contacts.find(
               <div className="grid gap-3 sm:grid-cols-3">
                 {[ ["KDV hariç tutar", preview.subtotal], ["KDV toplamı", preview.vatTotal], ["Ödenecek tutar · KDV dahil", preview.estimatedTotal] ].map(([label, value]) => <div key={String(label)} className="rounded-2xl bg-emerald-50 p-5"><p className="text-sm font-bold text-emerald-800">{label}</p><p className="mt-2 text-2xl font-black text-slate-950">{formatMoney(value)}</p></div>)}
               </div>
-              <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">{preview.pricingNote}</p>
+              <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">Bu fatura: {formatNumber(preview.invoiceTons)} ton · Sonrasında kalan: {formatNumber(preview.remainingTons)} ton / {formatMoney(preview.remainingTotal)}<br />{preview.pricingNote}</p>
               <div className="overflow-x-auto rounded-2xl border border-slate-100">
                 <table className="w-full min-w-[760px] text-left text-sm">
                   <thead className="bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-400">

@@ -1,3 +1,4 @@
+import { cachedIncomingPage } from "@/lib/parasut/incoming-cache";
 import { invoiceAdmin, reusableInvoices } from "@/lib/parasut/invoice-pool";
 import { NextResponse } from "next/server";
 
@@ -43,9 +44,9 @@ export async function GET(req: Request) {
       );
     }
 
-    const token = await getAccessToken();
     const id = new URL(req.url).searchParams.get("id");
     if (id) {
+      const token = await getAccessToken();
       const { data: stored, error: poolError } = await invoiceAdmin().from("purchase_invoice_pool").select("*").eq("e_invoice_id", id).maybeSingle();
       if (poolError) throw new Error("Fatura takip kaydı okunamadı.");
       const endpoint = stored?.state === "ready" ? `/purchase_bills/${encodeURIComponent(stored.purchase_bill_id)}?include=details,details.product` : `/e_invoices/${encodeURIComponent(id)}/convert`;
@@ -69,23 +70,13 @@ export async function GET(req: Request) {
     const page = Math.max(1, Number(new URL(req.url).searchParams.get("page")) || 1);
     const url = `${BASE_URL}/v4/${companyId}/e_invoices?page[number]=${page}&page[size]=25&scope=importable&sort=-issue_date`;
 
-    const res = await fetch(url, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-      cache: "no-store",
+    const data = await cachedIncomingPage(`incoming:${companyId}:${page}`, async () => {
+      const token = await getAccessToken();
+      const res = await fetch(url, {headers:{Authorization:`Bearer ${token}`,Accept:"application/json"},cache:"no-store"});
+      const payload = await res.json();
+      if (!res.ok) throw new Error("Paraşüt fatura listesi alınamadı; tekrar denemeden önce 5 dakika beklenir.");
+      return payload;
     });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      return NextResponse.json(
-        { success: false, error: data },
-        { status: res.status },
-      );
-    }
 
     const incomingInvoices = (data.data || []).map((item: any) => {
       const attr = item.attributes || {};
