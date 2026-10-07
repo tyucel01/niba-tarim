@@ -1,3 +1,4 @@
+import { Shell, s, WhatsApp, Intro } from '../../_public/site';
 export const metadata = {
   title: "Gübre Fiyatları 2026 | CAN 26, Üre, DAP Güncel Liste",
   description:
@@ -6,19 +7,17 @@ export const metadata = {
 
 export default function Page() {
   return (
-    <main className="bg-white">
+    <Shell><Intro label="Tarım rehberi" title="Gübre fiyatları ve teklif rehberi" text="Ürün, miktar ve teslimat koşullarını değerlendirerek tedarik ihtiyacınızı planlayın."/>
 
-      <section className="mx-auto max-w-4xl px-6 py-16">
+      <section className={`${s.container} ${s.section} ${s.article}`}>
 
-        <h1 className="text-4xl font-black text-slate-950">
-          2026 Güncel Gübre Fiyatları
-        </h1>
+
 
         {/* HERO GÖRSEL */}
         <div className="mt-8 overflow-hidden rounded-3xl shadow-lg">
           <img
-            src="/blog/gubre.jpg"
-            alt="2026 güncel gübre fiyatları"
+            src="/site/wheat-landscape.jpg"
+            alt="Gelişim dönemindeki yeşil tahıl tarlası"
             className="w-full h-[420px] object-cover"
           />
         </div>
@@ -42,12 +41,12 @@ export default function Page() {
         {/* ORTA GÖRSEL */}
         <div className="my-10">
           <img
-            src="/blog/gubre2.jpg"
-            alt="gübre üretimi ve tedarik"
+            src="/site/corn-field.jpg"
+            alt="Yeşil mısır tarlası"
             className="w-full h-[350px] object-cover rounded-2xl shadow-md"
           />
           <p className="text-sm text-slate-500 mt-2">
-            Gübre fiyatları, üretim ve lojistik süreçlerinden doğrudan etkilenir.
+            Tarla görselleri temsilidir; ürün ve teslimat koşulları teklif sırasında değerlendirilir.
           </p>
         </div>
 
@@ -62,8 +61,8 @@ export default function Page() {
 
         <div className="my-8">
           <img
-            src="/blog/can26.jpg"
-            alt="CAN 26 gübre fiyatı"
+            src="/site/canola-field.jpg"
+            alt="Kanola tarlası"
             className="w-full h-[350px] object-cover rounded-2xl shadow-md"
           />
         </div>
@@ -79,8 +78,8 @@ export default function Page() {
 
         <div className="my-8">
           <img
-            src="/blog/ure.jpg"
-            alt="üre gübre fiyatı"
+            src="/site/wheat-landscape.jpg"
+            alt="Gelişim dönemindeki yeşil tahıl tarlası"
             className="w-full h-[350px] object-cover rounded-2xl shadow-md"
           />
         </div>
@@ -96,8 +95,8 @@ export default function Page() {
 
         <div className="my-8">
           <img
-            src="/blog/dap.jpg"
-            alt="DAP gübre fiyatı"
+            src="/site/corn-field.jpg"
+            alt="Yeşil mısır tarlası"
             className="w-full h-[350px] object-cover rounded-2xl shadow-md"
           />
         </div>
@@ -113,26 +112,10 @@ export default function Page() {
         </p>
 
         {/* CTA */}
-        <div className="mt-14 bg-emerald-900 text-white p-8 rounded-3xl text-center shadow-lg">
-          <h3 className="text-2xl font-black">
-            Anında En İyi Fiyat Teklifini Alın
-          </h3>
-
-          <p className="mt-3 text-white/80">
-            Ürün ve miktar bilgisini gönderin, size en uygun fiyatı sunalım.
-          </p>
-
-          <a
-            href="https://wa.me/905334928522"
-            target="_blank"
-            className="inline-block mt-6 bg-green-500 px-6 py-4 rounded-lg font-black"
-          >
-            WhatsApp’tan Teklif Al
-          </a>
-        </div>
+        <div className={s.aside}><h3>Güncel teklif alın</h3><p>Ürün, tonaj ve teslimat ilinizi bize iletin.</p><WhatsApp/></div>
 
       </section>
 
-    </main>
+    </Shell>
   );
 }

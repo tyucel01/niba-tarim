@@ -24,7 +24,7 @@ function toNumber(value: any) {
 
 export async function POST(
   req: NextRequest,
-  context: { params: { id: string } | Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const params = await context.params;

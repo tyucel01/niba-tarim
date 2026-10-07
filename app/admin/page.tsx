@@ -1,6 +1,7 @@
 "use client";
 
 import Dashboard from "./dashboard";
+import LoginForm from "./login-form";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
@@ -130,44 +131,7 @@ if (!userPhone) {
   }
 
   if (step === "login") {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#eef1ea] p-4">
-        <div className="w-full max-w-md rounded-[32px] bg-white p-8 shadow-2xl shadow-slate-900/10 ring-1 ring-slate-100">
-          <p className="text-center text-xs font-black uppercase tracking-[0.24em] text-emerald-700">
-            Niba Tarım
-          </p>
-          <h1 className="mt-2 text-center text-3xl font-black tracking-tight">
-            Admin Giriş
-          </h1>
-          <p className="mt-2 text-center text-sm text-slate-500">
-            Operasyon paneline erişmek için giriş yap.
-          </p>
-
-          <input
-            placeholder="Email"
-            className="mt-7 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-[#00a884] focus:ring-4 focus:ring-emerald-100"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-
-          <input
-            type="password"
-            placeholder="Şifre"
-            className="mt-4 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-[#00a884] focus:ring-4 focus:ring-emerald-100"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-
-          <button
-            type="button"
-            onClick={loginWithEmail}
-            className="mt-6 w-full rounded-2xl bg-gradient-to-r from-[#00a884] to-[#00c297] py-3 font-black text-white shadow-xl shadow-emerald-900/10"
-          >
-            Giriş Yap
-          </button>
-        </div>
-      </main>
-    );
+    return <LoginForm email={email} password={password} onEmailChange={setEmail} onPasswordChange={setPassword} onLogin={loginWithEmail} />;
   }
 
   if (step === "otp") {

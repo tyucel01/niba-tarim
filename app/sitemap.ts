@@ -1,20 +1,4 @@
-export default function sitemap() {
-  return [
-    {
-      url: "https://www.nibatarim.com",
-      lastModified: new Date(),
-    },
-    {
-      url: "https://www.nibatarim.com/blog",
-      lastModified: new Date(),
-    },
-    {
-      url: "https://www.nibatarim.com/blog/gubre-fiyatlari",
-      lastModified: new Date(),
-    },
-    {
-      url: "https://www.nibatarim.com/blog/can-26-gubre-fiyati",
-      lastModified: new Date(),
-    },
-  ];
+import type { MetadataRoute } from 'next';
+export default function sitemap(): MetadataRoute.Sitemap {
+  return ['', '/hakkimizda', '/urunler', '/markalar', '/iletisim', '/blog', '/blog/gubre-fiyatlari', '/blog/can-26-gubre-fiyati', '/blog/toptan-gubre-bayiler-icin-tedarik-rehberi'].map(path => ({ url: `https://www.nibatarim.com${path}`, lastModified: new Date('2026-10-07T12:00:00+03:00') }));
 }

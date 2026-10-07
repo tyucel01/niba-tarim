@@ -1,0 +1,3 @@
+import {Shell,Intro,s,Brands,WhatsApp} from '../_public/site';
+export const metadata={title:'Markalar | Niba Tarım',description:'Niba Tarım tedarik ağındaki gübre markaları.'};
+export default function BrandsPage(){return <Shell><Intro label="Markalar" title="Tedarik ağımızdaki markalar." text="Ürün grupları ve güncel tedarik seçenekleri hakkında bilgi almak için bizimle iletişime geçin."/><section className={s.section}><div className={s.container}><Brands/></div></section><section className={`${s.section} ${s.tinted}`}><div className={s.container}><h2>Aradığınız ürünü birlikte değerlendirelim.</h2><p>Marka, ürün adı, tonaj ve teslimat ilinizi iletin; güncel seçenekler için görüşelim.</p><WhatsApp/></div></section></Shell>}
