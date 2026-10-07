@@ -1,28 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-function getStatusBadge(status: string) {
-  const s = (status || "").toLowerCase();
-
-  if (s === "completed") {
-    return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
-  }
-
-  if (s === "cancelled") {
-    return "bg-red-50 text-red-700 ring-1 ring-red-200";
-  }
-
-  if (s === "processing") {
-    return "bg-blue-50 text-blue-700 ring-1 ring-blue-200";
-  }
-
-  if (s === "pending") {
-    return "bg-amber-50 text-amber-700 ring-1 ring-amber-200";
-  }
-
-  return "bg-slate-100 text-slate-700 ring-1 ring-slate-200";
-}
+import { useEffect, useState, useRef } from "react";
+import { CheckCircle2, Clock3, Search, Send, XCircle } from 'lucide-react';
+import { usePanelDialog } from '@/app/admin/ui/panel-dialog';
+import { EmptyState, Feedback, WhatsAppShell } from '../whatsapp-shell';
+import styles from '../whatsapp-pages.module.css';
 
 function getStatusText(status: string) {
   const s = (status || "").toLowerCase();
@@ -53,7 +35,7 @@ function formatDate(value?: string) {
   if (!value) return "-";
 
   try {
-    return new Date(value + "Z").toLocaleString("tr-TR", {
+    return new Date(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : value + "Z").toLocaleString("tr-TR", {
       timeZone: "Europe/Istanbul",
     });
   } catch {
@@ -61,264 +43,18 @@ function formatDate(value?: string) {
   }
 }
 
-export default function Page() {
-  const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
-  const [lastUpdated, setLastUpdated] = useState("");
-
-  async function loadCampaigns() {
-    try {
-      setLoading(true);
-
-      const res = await fetch(`/api/admin/whatsapp/campaigns?t=${Date.now()}`, {
-        cache: "no-store",
-      });
-
-      const data = await res.json();
-
-      if (data.success) {
-        setCampaigns(data.campaigns || []);
-        setLastUpdated(
-          new Date().toLocaleTimeString("tr-TR", {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          }),
-        );
-      } else {
-        setMessage("❌ Raporlar yüklenemedi: " + JSON.stringify(data.error));
-      }
-    } catch (err) {
-      setMessage("❌ Raporlar yüklenemedi: " + String(err));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function cancelCampaign(id: string) {
-    if (!confirm("Bu kampanyanın kalan gönderimleri iptal edilsin mi?")) {
-      return;
-    }
-
-    try {
-      setMessage("");
-
-      const res = await fetch("/api/admin/whatsapp/campaigns/cancel", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ campaignId: id }),
-      });
-
-      const data = await res.json();
-
-      if (!data.success) {
-        setMessage("❌ İptal edilemedi: " + JSON.stringify(data.error || data));
-        return;
-      }
-
-      setMessage("✅ Kampanyanın kalan pending mesajları iptal edildi.");
-      await loadCampaigns();
-    } catch (err) {
-      setMessage("❌ İptal hatası: " + String(err));
-    }
-  }
-
-  useEffect(() => {
-    loadCampaigns();
-
-    const interval = setInterval(() => {
-      loadCampaigns();
-    }, 15000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  return (
-    <main className="min-h-screen bg-[#eef1ea] p-4 text-slate-900 md:p-6">
-      <div className="mx-auto max-w-7xl space-y-4">
-        <section className="rounded-2xl bg-white px-5 py-4 shadow-sm ring-1 ring-slate-100">
-          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.22em] text-emerald-700">
-                Niba Tarım
-              </p>
-              <h1 className="mt-1 text-xl font-black tracking-tight text-slate-950">
-                WhatsApp Gönderim Raporları
-              </h1>
-              <p className="mt-1 text-xs text-slate-500">
-                Canlı gönderim takibi. Sayfa otomatik yenilenir.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3">
-              {lastUpdated && (
-                <div className="hidden rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100 md:block">
-                  ● Son güncelleme: {lastUpdated}
-                </div>
-              )}
-
-              <a
-                href="/admin/whatsapp/gonder"
-                className="rounded-xl bg-slate-100 px-4 py-2 text-xs font-black text-slate-700 ring-1 ring-slate-200 hover:bg-slate-200"
-              >
-                Gönderime Dön
-              </a>
-
-              <button
-                type="button"
-                onClick={loadCampaigns}
-                disabled={loading}
-                className="rounded-xl bg-slate-950 px-4 py-2 text-xs font-black text-white transition active:scale-95 disabled:opacity-50"
-              >
-                {loading ? "Güncelleniyor..." : "Yenile"}
-              </button>
-            </div>
-          </div>
-
-          {message && (
-            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs font-semibold text-slate-700 ring-1 ring-slate-100">
-              {message}
-            </div>
-          )}
-        </section>
-
-        <section className="space-y-2">
-          {campaigns.map((c) => {
-            const total = c.total_count || 0;
-            const success = c.success_count || 0;
-            const fail = c.fail_count || 0;
-            const done = success + fail;
-            const remaining = Math.max(total - done, 0);
-            const percent =
-              total > 0 ? Math.min(Math.round((done / total) * 100), 100) : 0;
-
-            const status = getRealStatus(c);
-            const perMinute = 15;
-            const minutes = Math.ceil(remaining / perMinute);
-
-            const canCancel =
-              status !== "completed" &&
-              status !== "cancelled" &&
-              total > done;
-
-            return (
-              <div
-                key={c.id}
-                className="rounded-2xl border border-white/80 bg-white px-4 py-3 shadow-sm ring-1 ring-slate-100"
-              >
-                <div className="grid gap-3 md:grid-cols-[230px_1fr_360px_90px] md:items-center">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate text-sm font-black text-slate-950">
-                        {c.template_name || "-"}
-                      </p>
-
-                      <span
-                        className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${getStatusBadge(
-                          status,
-                        )}`}
-                      >
-                        {getStatusText(status)}
-                      </span>
-                    </div>
-
-                    <p className="mt-1 text-xs font-semibold text-slate-500">
-                      {formatDate(c.created_at)}
-                    </p>
-                  </div>
-
-                  <div className="min-w-0">
-                    <div className="mb-1 flex items-center justify-between text-xs">
-                      <span className="font-bold text-slate-500">
-                        {done}/{total}
-                      </span>
-                      <span className="font-black text-slate-900">
-                        %{percent}
-                      </span>
-                    </div>
-
-                    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className={`h-full rounded-full ${
-                          status === "cancelled" ? "bg-red-400" : "bg-[#00a884]"
-                        }`}
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
-
-                    <p className="mt-1 text-[11px] font-semibold text-slate-500">
-                      {status === "completed"
-                        ? "Tamamlandı"
-                        : status === "cancelled"
-                          ? `${remaining} mesaj kaldı`
-                          : `${remaining} kaldı · yaklaşık ${minutes} dk`}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-2 text-center">
-                    <div className="rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-100">
-                      <p className="text-[10px] font-bold text-slate-400">
-                        Toplam
-                      </p>
-                      <p className="text-sm font-black text-slate-950">
-                        {total}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-emerald-50 px-3 py-2 ring-1 ring-emerald-100">
-                      <p className="text-[10px] font-bold text-emerald-600">
-                        Başarılı
-                      </p>
-                      <p className="text-sm font-black text-emerald-700">
-                        {success}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-red-50 px-3 py-2 ring-1 ring-red-100">
-                      <p className="text-[10px] font-bold text-red-600">
-                        Hata
-                      </p>
-                      <p className="text-sm font-black text-red-700">{fail}</p>
-                    </div>
-
-                    <div className="rounded-xl bg-blue-50 px-3 py-2 ring-1 ring-blue-100">
-                      <p className="text-[10px] font-bold text-blue-600">
-                        Kalan
-                      </p>
-                      <p className="text-sm font-black text-blue-700">
-                        {remaining}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="text-right">
-                    {canCancel ? (
-                      <button
-                        type="button"
-                        onClick={() => cancelCampaign(c.id)}
-                        className="rounded-xl bg-red-50 px-3 py-2 text-xs font-black text-red-600 ring-1 ring-red-100 hover:bg-red-100"
-                      >
-                        İptal
-                      </button>
-                    ) : (
-                      <span className="text-xs font-bold text-slate-400">-</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-
-          {campaigns.length === 0 && (
-            <div className="rounded-2xl bg-white p-8 text-center text-sm font-semibold text-slate-500 shadow-sm ring-1 ring-slate-100">
-              Henüz gönderim raporu yok.
-            </div>
-          )}
-        </section>
-      </div>
-    </main>
-  );
+export default function Page(){
+  const [campaigns,setCampaigns]=useState<any[]>([]),[loading,setLoading]=useState(true),[message,setMessage]=useState(''),[lastUpdated,setLastUpdated]=useState(''),[search,setSearch]=useState(''),[filter,setFilter]=useState('all'),[cancelling,setCancelling]=useState('');
+  const inFlight=useRef(false);const {panelConfirm}=usePanelDialog();
+  async function loadCampaigns(){if(inFlight.current)return;inFlight.current=true;setLoading(true);try{const res=await fetch(`/api/admin/whatsapp/campaigns?t=${Date.now()}`,{cache:'no-store'});const data=await res.json();if(!res.ok || !data.success)throw new Error(data.error || 'Raporlar yüklenemedi.');setCampaigns(data.campaigns || []);setLastUpdated(new Date().toLocaleTimeString('tr-TR',{timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit',second:'2-digit'}));}catch(error){setMessage('❌ '+(error instanceof Error?error.message:'Raporlar yüklenemedi.'));}finally{setLoading(false);inFlight.current=false;}}
+  async function cancelCampaign(id:string){if(cancelling || !await panelConfirm('Bu kampanyanın kalan gönderimleri iptal edilsin mi? Gönderilmiş mesajlar geri alınmaz.'))return;setCancelling(id);setMessage('');try{const res=await fetch('/api/admin/whatsapp/campaigns/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:id})});const data=await res.json();if(!res.ok || !data.success)throw new Error(data.error || 'Gönderim iptal edilemedi.');setMessage('✅ Kampanyanın bekleyen mesajları iptal edildi.');await loadCampaigns();}catch(error){setMessage('❌ '+(error instanceof Error?error.message:'Gönderim iptal edilemedi.'));}finally{setCancelling('');}}
+  useEffect(()=>{void loadCampaigns();const timer=setInterval(()=>{if(document.visibilityState==='visible')void loadCampaigns();},15000);return()=>clearInterval(timer);},[]);
+  const stats=campaigns.reduce((out,c)=>{out.success+=Number(c.success_count || 0);out.fail+=Number(c.fail_count || 0);if(getRealStatus(c)!=='cancelled')out.remaining+=Math.max(Number(c.total_count || 0)-Number(c.success_count || 0)-Number(c.fail_count || 0),0);return out;},{success:0,fail:0,remaining:0});
+  const filtered=campaigns.filter(c=>(filter==='all' || getRealStatus(c)===filter) && String(c.template_name || '').toLocaleLowerCase('tr-TR').includes(search.toLocaleLowerCase('tr-TR').trim()));
+  return <WhatsAppShell title="Gönderim raporları" description="Kampanyalarını, gönderim sonuçlarını ve sıradaki mesajları takip et." active="reports" onRefresh={loadCampaigns} loading={loading}>
+    <section className={styles.stats} aria-label="Gönderim özeti">{[{title:'Kampanya',value:campaigns.length,icon:Send},{title:'Başarılı gönderim',value:stats.success,icon:CheckCircle2},{title:'Hatalı gönderim',value:stats.fail,icon:XCircle},{title:'Bekleyen mesaj',value:stats.remaining,icon:Clock3}].map(item=><div key={item.title} className={styles.stat}><item.icon size={24}/><div><span>{item.title}</span><strong>{loading && !lastUpdated ? '—' : new Intl.NumberFormat('tr-TR').format(item.value)}</strong></div></div>)}</section>
+    <Feedback message={message}/><div className={styles.toolbar}><label className={styles.search}><Search size={17}/><span className="sr-only">Kampanya ara</span><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Şablon adına göre ara…"/></label><span className={styles.hint}>{lastUpdated ? `Son güncelleme: ${lastUpdated} · 15 saniyede bir yenilenir` : 'Raporlar hazırlanıyor…'}</span></div>
+    <div className={styles.filters} aria-label="Gönderim durumu">{[{id:'all',label:'Tümü'},{id:'processing',label:'Gönderiliyor'},{id:'pending',label:'Bekliyor'},{id:'completed',label:'Tamamlandı'},{id:'cancelled',label:'İptal edildi'}].map(item=><button key={item.id} type="button" aria-pressed={filter===item.id} onClick={()=>setFilter(item.id)}>{item.label}</button>)}</div>
+    <section aria-label="Kampanya sonuçları">{filtered.map(c=>{const total=Number(c.total_count || 0),success=Number(c.success_count || 0),fail=Number(c.fail_count || 0),done=success+fail,remaining=Math.max(total-done,0),percent=total>0?Math.min(Math.round(done/total*100),100):0,status=getRealStatus(c);const canCancel=status!=='completed' && status!=='cancelled' && remaining>0;return <article key={c.id} className={styles.campaign}><header className={styles.campaignHeader}><div><h2>{c.template_name || 'Şablon belirtilmedi'}</h2><p>{formatDate(c.created_at)}</p></div><span className={`${styles.badge} ${styles[status] || ''}`}>{getStatusText(status)}</span></header><div className={styles.campaignBody}><div><div className={styles.progressLabel}><span>{done} / {total} mesaj işlendi</span><strong>%{percent}</strong></div><div className={styles.progress} role="progressbar" aria-label={`${c.template_name || 'Kampanya'} ilerlemesi`} aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}><div style={{width:`${percent}%`}}/></div><p className={styles.progressNote}>{status==='completed'?'Tüm mesajlar işlendi.':status==='cancelled'?`${remaining} mesaj iptal nedeniyle gönderilmedi.`:`${remaining} mesaj sırada bekliyor.`}</p></div><div className={styles.metrics}>{[{label:'Toplam',value:total},{label:'Başarılı',value:success},{label:'Hatalı',value:fail},{label:status==='cancelled'?'Gönderilmedi':'Kalan',value:remaining}].map(m=><div key={m.label} className={styles.metric}><span>{m.label}</span><strong>{m.value}</strong></div>)}</div></div>{canCancel && <footer className={styles.campaignFooter}><span>Bekleyen gönderimleri durdurabilirsin.</span><button type="button" className={styles.danger} onClick={()=>cancelCampaign(c.id)} disabled={!!cancelling}>{cancelling===c.id?'İptal ediliyor…':'Kalanı iptal et'}</button></footer>}</article>;})}{!filtered.length && <EmptyState loading={loading} filtered={!!search || filter!=='all'} label="Henüz gönderim raporu yok"/>}</section>
+  </WhatsAppShell>;
 }
