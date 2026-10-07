@@ -199,8 +199,10 @@ export default function SiparisDetayPage() {
     }
     const detail = invoiceDetails[String(invoice.id)];
     if (!detail) { alert("Önce fatura detayını açıp kontrol edin."); return; }
+    const available = invoice.remaining_amount ?? detail.net_total;
+    if (numberValue(available) < calc.toplamAlisTutari) { alert("Faturanın kalan tutarı bu sipariş için yetersiz."); return; }
     const confirmText = selectedContact
-      ? `${getContactName(selectedContact)}\nFatura: ${getInvoiceNo(invoice)}\nFatura tutarı: ${formatInvoiceMoney(detail.net_total, detail.currency)}\nSiparişten beklenen: ${formatMoney(calc.toplamAlisTutari)}\nFatura kalemlerini ve tutarı kontrol ettiniz mi? Giderleştirmeyi onaylıyor musunuz?`
+      ? `${getContactName(selectedContact)}\nFatura: ${getInvoiceNo(invoice)}\nFatura tutarı: ${formatInvoiceMoney(detail.net_total, detail.currency)}\nSiparişten beklenen: ${formatMoney(calc.toplamAlisTutari)}\nBu siparişe ayrılacak: ${formatMoney(calc.toplamAlisTutari)}\nFaturada kalacak: ${formatInvoiceMoney(numberValue(available) - calc.toplamAlisTutari, detail.currency)}\nFatura kalemlerini ve tutarı kontrol ettiniz mi? Giderleştirmeyi onaylıyor musunuz?`
       : "Seçilen cari karta gider kaydı atılacak. Onaylıyor musun?";
 
     if (!window.confirm(confirmText)) return;
@@ -237,10 +239,11 @@ export default function SiparisDetayPage() {
         await loadOrder();
       }
 
+      await loadPurchaseInvoices();
       alert(
         `✅ Fatura giderlere kaydedildi ve siparişle eşleştirildi.\n\nGider ID: ${
           data.purchaseBillId || "-"
-        }\nFatura No: ${data.purchaseBillNo || "-"}`
+        }\nFatura No: ${data.purchaseBillNo || "-"}\nBu siparişe ayrılan: ${formatMoney(data.allocatedAmount)}\nFaturada kalan: ${formatMoney(data.remainingAmount)}`
       );
     } catch (err: any) {
       alert(err?.message || "Hata oluştu.");
@@ -531,7 +534,8 @@ export default function SiparisDetayPage() {
                     {siparis.matched_purchase_invoice_no}
                   </p>
                   <p className="mt-1 text-xs font-semibold text-emerald-800">
-                    {siparis.matched_purchase_invoice_total == null ? "Tutar bilgisi kayıtlı değil" : formatMoney(siparis.matched_purchase_invoice_total)}
+                    {siparis.matched_purchase_invoice_total == null ? "Tutar bilgisi kayıtlı değil" : `Fatura toplamı: ${formatMoney(siparis.matched_purchase_invoice_total)}`}
+                    {siparis.matched_purchase_allocated_amount != null && <span className="mt-1 block">Bu siparişe ayrılan: {formatMoney(siparis.matched_purchase_allocated_amount)}</span>}
                   </p>
                 </div>
               )}
@@ -586,6 +590,7 @@ export default function SiparisDetayPage() {
                           </div>
                         </div>
 
+                        {invoice.reusable && <div className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm"><p className="font-bold text-emerald-800">Kalan tutarı kullanılabilir · Yeni gider kaydı oluşturulmaz</p><p className="mt-1">Toplam: {formatInvoiceMoney(total, currency)} · Ayrılan: {formatInvoiceMoney(invoice.allocated_amount, currency)} · Kalan: {formatInvoiceMoney(invoice.remaining_amount, currency)}</p></div>}
                         <p className="mt-3 text-sm text-slate-600">Fatura tarihi: {formatDate(detail?.issue_date || invoice.attributes?.issue_date)}</p>
                         <p className={`mt-2 text-sm font-bold ${taxMatches ? "text-emerald-700" : "text-amber-800"}`}>{taxMatches ? "VKN/TCKN seçili cariyle birebir eşleşiyor" : "VKN/TCKN doğrulanamadı; giderleştirme kapalı"}</p>
                         <div className="mt-4">
@@ -603,7 +608,7 @@ export default function SiparisDetayPage() {
                         </div>
                         <button
                           type="button"
-                          disabled={matchingInvoice || !selectedSupplierId || !taxMatches || !detail?.details?.length || detail?.net_total == null}
+                          disabled={matchingInvoice || !selectedSupplierId || !taxMatches || !detail?.details?.length || detail?.net_total == null || (invoice.remaining_amount != null && numberValue(invoice.remaining_amount) < calc.toplamAlisTutari)}
                           onClick={() => matchInvoice(invoice)}
                           className={`mt-4 w-full rounded-xl px-4 py-3 text-xs font-black transition ${
                             selectedSupplierId
@@ -614,7 +619,7 @@ export default function SiparisDetayPage() {
                           {selectedSupplierId
                             ? matchingInvoice
                               ? "Giderleştiriliyor..."
-                              : "Bu faturayı seçili cari karta giderleştir ve eşleştir"
+                              : invoice.reusable ? "Kalan tutardan bu siparişe pay ayır ve eşleştir" : "Faturayı giderleştir ve bu siparişe pay ayır"
                             : "Önce cari kart seç"}
                         </button>
                       </div>

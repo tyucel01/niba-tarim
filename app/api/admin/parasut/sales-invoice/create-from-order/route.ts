@@ -229,6 +229,10 @@ function buildSalesInvoicePayload({
   if (!["TRL", "TRY"].includes(purchaseCurrency)) throw new Error("Alış faturası döviz cinsinde; TL sipariş fiyatıyla otomatik hesaplanamaz.");
   const targetTotal = toNumber(order.bayiSatisToplam) || toNumber(order.pesinSatisFiyati) * (toNumber(order.teslimOlanTonaj) || toNumber(order.siparisTonaj));
   if (!(targetTotal > 0)) throw new Error("KDV dahil satış tutarı geçerli değil.");
+  const allocated = order.matched_purchase_allocated_amount == null ? null : toNumber(order.matched_purchase_allocated_amount);
+  const purchaseTotal = toNumber(purchaseBill.data?.attributes?.net_total);
+  const share = allocated == null ? 1 : allocated / purchaseTotal;
+  if (!(share > 0) || share > 1 || !Number.isFinite(share)) throw new Error("Siparişe ayrılan fatura tutarı doğrulanamadı.");
   const sourceLines = details.map((row: any) => {
     const attr = row.attributes || {};
     if (attr.vat_rate == null || attr.vat_rate === "" || !Number.isFinite(Number(attr.vat_rate))) throw new Error("Alış faturasında KDV oranı eksik/geçersiz. Sıfır varsayılmadı.");
@@ -251,9 +255,9 @@ function buildSalesInvoicePayload({
     type: "sales_invoice_details",
     attributes: {
       description: line.name,
-      quantity: line.quantity,
+      quantity: Number((line.quantity * share).toFixed(8)),
       unit: line.unit,
-      unit_price: Number((line.net * factor / line.quantity).toFixed(8)),
+      unit_price: Number((line.net * factor / (line.quantity * share)).toFixed(8)),
       vat_rate: line.vatRate,
       discount_type: "amount",
       discount_value: 0,
@@ -324,7 +328,10 @@ function buildSalesInvoicePayload({
       vatTotal: round(vatTotal),
       targetTotal,
       currency: "TRY",
-      pricingNote: "Sipariş satış fiyatı KDV dahildir. Tüm alış kalemlerinin ürün, miktar, birim ve KDV oranları korunur; satış tutarı alış kalemlerinin KDV dahil tutar paylarına göre dağıtılır.",
+      allocatedPurchaseAmount: allocated,
+      sourcePurchaseTotal: purchaseTotal,
+      sourceShare: share,
+      pricingNote: share < 1 ? "Bu alış faturası birden fazla siparişi kapsıyor. Kalem miktarları siparişe ayrılan alış tutarı oranında paylaştırıldı. Ürünleri ve miktarları kontrol edin; satış fiyatı KDV dahildir." : "Sipariş satış fiyatı KDV dahildir. Alış kalemlerinin ürün, miktar, birim ve KDV oranları korunur; satış tutarı kalemlerin tutar paylarına göre dağıtılır.",
     },
   };
 }

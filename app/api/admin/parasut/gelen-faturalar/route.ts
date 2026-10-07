@@ -1,3 +1,4 @@
+import { invoiceAdmin, reusableInvoices } from "@/lib/parasut/invoice-pool";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +46,10 @@ export async function GET(req: Request) {
     const token = await getAccessToken();
     const id = new URL(req.url).searchParams.get("id");
     if (id) {
-      const response = await fetch(`${BASE_URL}/v4/${companyId}/e_invoices/${encodeURIComponent(id)}/convert`, {
+      const { data: stored, error: poolError } = await invoiceAdmin().from("purchase_invoice_pool").select("*").eq("e_invoice_id", id).maybeSingle();
+      if (poolError) throw new Error("Fatura takip kaydı okunamadı.");
+      const endpoint = stored?.state === "ready" ? `/purchase_bills/${encodeURIComponent(stored.purchase_bill_id)}?include=details,details.product` : `/e_invoices/${encodeURIComponent(id)}/convert`;
+      const response = await fetch(`${BASE_URL}/v4/${companyId}${endpoint}`, {
         headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, cache: "no-store",
       });
       const payload = await response.json();
@@ -53,7 +57,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ success: true, invoice: {
         ...payload.data?.attributes,
         gross_total: payload.data?.attributes?.gross_total ?? (payload.data?.attributes?.net_total != null && payload.data?.attributes?.total_vat != null ? Number(payload.data.attributes.net_total) - Number(payload.data.attributes.total_vat) : null),
-        details: (payload.included || []).filter((item: any) => item.type === "e_invoice_preview_detail").map((item: any) => {
+        details: (payload.included || []).filter((item: any) => ["e_invoice_preview_detail", "purchase_bill_details"].includes(item.type)).map((item: any) => {
           const attributes = item.attributes || {};
           const base = Number(attributes.quantity) * Number(attributes.unit_price);
           const discount = attributes.discount_type === "percentage" ? base * Number(attributes.discount_value || 0) / 100 : Number(attributes.discount_value || 0);
@@ -83,7 +87,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const invoices = (data.data || []).map((item: any) => {
+    const incomingInvoices = (data.data || []).map((item: any) => {
       const attr = item.attributes || {};
 
       return {
@@ -114,9 +118,16 @@ export async function GET(req: Request) {
       };
     });
 
+    const { data: tracked, error: trackedError } = await invoiceAdmin().from("purchase_invoice_pool").select("e_invoice_id").eq("state", "ready");
+    if (trackedError) throw new Error("Fatura takip kayıtları okunamadı.");
+    const trackedIds = new Set((tracked || []).map(row => row.e_invoice_id));
+    const invoices = incomingInvoices.filter((row: any) => !trackedIds.has(String(row.id)));
+    const reusable = page === 1 ? await reusableInvoices() : [];
     return NextResponse.json({
       success: true,
-      invoices,
+      invoices: [...reusable, ...invoices],
+      reusableCount: reusable.length,
+      incomingInvoices: invoices,
       nextPage: data.links?.next || Number(data.meta?.total_pages) > page ? page + 1 : null,
       meta: data.meta || null,
       links: data.links || null,

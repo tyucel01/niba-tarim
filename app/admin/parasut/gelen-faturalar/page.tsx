@@ -64,45 +64,8 @@ export default function GelenFaturalarPage() {
   }, []);
 
   async function handleManualMatch() {
-    if (!selectedInvoice || !selectedOrderId) {
-      alert("Lütfen fatura ve sipariş seç.");
-      return;
-    }
-
-    try {
-      setMatchingLoading(true);
-
-      const res = await fetch("/api/admin/parasut/match-invoice", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          eInvoiceId: selectedInvoice.id,
-          invoiceNo: getInvoiceNo(selectedInvoice),
-          invoiceUuid: getInvoiceUuid(selectedInvoice),
-          supplierName: getSupplierName(selectedInvoice),
-          supplierVkn: getSupplierVkn(selectedInvoice),
-          siparisId: selectedOrderId,
-          invoiceTotal: getInvoiceTotal(selectedInvoice),
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!data.success) {
-        alert("Eşleştirme başarısız: " + JSON.stringify(data.error || data));
-        return;
-      }
-
-      alert("Fatura siparişle eşleştirildi.");
-
-      setSelectedInvoice(null);
-      setSelectedOrderId("");
-      await loadInvoices();
-    } catch (err) {
-      alert("Eşleştirme hatası: " + String(err));
-    } finally {
-      setMatchingLoading(false);
-    }
+    if (!selectedInvoice || !selectedOrderId) return;
+    window.location.assign(`/admin/siparisler/${encodeURIComponent(selectedOrderId)}#fatura`);
   }
 
   const autoMatchedCount = invoices.filter(
@@ -316,7 +279,7 @@ export default function GelenFaturalarPage() {
 
                     <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
                       <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-500 ring-1 ring-slate-200">
-                        Durum: {getInvoiceStatus(invoice)}
+                        Durum: {invoice.reusable ? `Kalan: ${formatMoney(invoice.remaining_amount)}` : getInvoiceStatus(invoice)}
                       </span>
                       <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-500 ring-1 ring-slate-200">
                         VKN: {getSupplierVkn(invoice) || "-"}
@@ -421,7 +384,7 @@ export default function GelenFaturalarPage() {
                 onClick={handleManualMatch}
                 className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white disabled:opacity-50"
               >
-                {matchingLoading ? "Eşleştiriliyor..." : "Eşleştir"}
+                {matchingLoading ? "Hazırlanıyor..." : "Siparişin fatura adımına geç"}
               </button>
             </div>
           </div>
