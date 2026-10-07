@@ -74,9 +74,9 @@ export async function GET(req: Request) {
       const token = await getAccessToken();
       const res = await fetch(url, {headers:{Authorization:`Bearer ${token}`,Accept:"application/json"},cache:"no-store"});
       const payload = await res.json();
-      if (!res.ok) throw new Error("Paraşüt fatura listesi alınamadı; tekrar denemeden önce 5 dakika beklenir.");
+      if (!res.ok) throw new Error(`Paraşüt fatura listesi alınamadı (HTTP ${res.status}); 1 dakika sonra yeniden deneyin.`);
       return payload;
-    });
+    }, new URL(req.url).searchParams.get("refresh") === "1");
 
     const incomingInvoices = (data.data || []).map((item: any) => {
       const attr = item.attributes || {};
@@ -114,11 +114,16 @@ export async function GET(req: Request) {
     const trackedIds = new Set((tracked || []).map(row => row.e_invoice_id));
     const invoices = incomingInvoices.filter((row: any) => !trackedIds.has(String(row.id)));
     const reusable = page === 1 ? await reusableInvoices() : [];
+    const taxNo = new URL(req.url).searchParams.get("taxNo")?.replace(/\D/g, "");
+    const supplierId = new URL(req.url).searchParams.get("supplierId");
+    const matchesSupplier = (row: any) => !taxNo || String(row.from_vkn || row.attributes?.from_vkn || "").replace(/\D/g, "") === taxNo || (row.reusable && row.supplier_id === supplierId);
+    const selectedInvoices = invoices.filter(matchesSupplier);
+    const selectedReusable = reusable.filter(matchesSupplier);
     return NextResponse.json({
       success: true,
-      invoices: [...reusable, ...invoices],
-      reusableCount: reusable.length,
-      incomingInvoices: invoices,
+      invoices: [...selectedReusable, ...selectedInvoices],
+      reusableCount: selectedReusable.length,
+      incomingInvoices: selectedInvoices,
       nextPage: data.links?.next || Number(data.meta?.total_pages) > page ? page + 1 : null,
       meta: data.meta || null,
       links: data.links || null,

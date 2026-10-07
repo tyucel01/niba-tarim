@@ -16,8 +16,9 @@ export default function PendingInvoices() {
   useEffect(() => {
     let active = true;
     let running = false;
+    let retryTimer: number | undefined;
     const controller = new AbortController();
-    async function load() {
+    async function load(force=false) {
       if (running || document.visibilityState === "hidden") return;
       running = true;
       try {
@@ -26,14 +27,14 @@ export default function PendingInvoices() {
         let cached: any = null;
         try { cached=JSON.parse(sessionStorage.getItem(cacheKey)||"null"); } catch { /* Optional tab-local cache. */ }
         let data: any;
-        if (refresh === 0 && cached?.data && Date.now()-cached.savedAt < 300000) { data=cached.data; }
+        if (!force && cached?.data && Date.now()-cached.savedAt < 14400000) { data=cached.data; }
         else {
-        const response = await fetch("/api/admin/parasut/gelen-faturalar", { cache: "no-store", signal: controller.signal, headers: session.session ? { Authorization: `Bearer ${session.session.access_token}` } : {} });
+        const response = await fetch(`/api/admin/parasut/gelen-faturalar${force ? "?refresh=1" : ""}`, { cache: "no-store", signal: controller.signal, headers: session.session ? { Authorization: `Bearer ${session.session.access_token}` } : {} });
         data = await response.json();
         if (!response.ok || !data.success) throw new Error("Bekleyen faturalar alınamadı.");
         let pages = 1;
         while (data.nextPage && pages < 20) {
-          const nextResponse = await fetch(`/api/admin/parasut/gelen-faturalar?page=${data.nextPage}`, { cache: "no-store", signal: controller.signal, headers: session.session ? { Authorization: `Bearer ${session.session.access_token}` } : {} });
+          const nextResponse = await fetch(`/api/admin/parasut/gelen-faturalar?page=${data.nextPage}${force ? "&refresh=1" : ""}`, { cache: "no-store", signal: controller.signal, headers: session.session ? { Authorization: `Bearer ${session.session.access_token}` } : {} });
           const next = await nextResponse.json();
           if (!nextResponse.ok || !next.success) throw new Error("Faturalar kontrol edilemedi.");
           data = { ...data, invoices: [...data.invoices, ...(next.invoices || [])], incomingInvoices: [...(data.incomingInvoices || data.invoices), ...(next.incomingInvoices || next.invoices || [])], nextPage: next.nextPage };
@@ -48,6 +49,7 @@ export default function PendingInvoices() {
         setHasMore(Boolean(data.nextPage));
         setTotal(data.nextPage ? null : rows.length);
         setError("");
+        window.clearTimeout(retryTimer);
         try {
           const key = `niba-invoice-seen:${session.session?.user.id || "admin"}`;
           const saved = localStorage.getItem(key);
@@ -57,13 +59,14 @@ export default function PendingInvoices() {
           } else { localStorage.setItem(key, JSON.stringify(incoming.map(row => String(row.id)))); }
         } catch { /* List remains usable when local storage is unavailable. */ }
       } catch (cause) {
-        if (active && !controller.signal.aborted) setError("Faturalar şu anda kontrol edilemiyor. Yeniden deneyin.");
+        if (active && !controller.signal.aborted) { setError("Fatura servisi geçici olarak beklemede. 1 dakika sonra otomatik yeniden denenecek."); window.clearTimeout(retryTimer); retryTimer = window.setTimeout(()=>void load(false),60000); }
       } finally { running = false; if (active) setLoading(false); }
     }
-    void load();
-    const timer = window.setInterval(load, 300000);
-    document.addEventListener("visibilitychange", load);
-    return () => { active = false; controller.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", load); };
+    void load(refresh > 0);
+    const timer = window.setInterval(()=>void load(false), 14400000);
+    const onVisible=()=>void load(false);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { active = false; controller.abort(); window.clearInterval(timer); window.clearTimeout(retryTimer); document.removeEventListener("visibilitychange", onVisible); };
   }, [refresh]);
   async function markRead() {
     try {
@@ -76,7 +79,7 @@ export default function PendingInvoices() {
   }
   return <section aria-labelledby="pending-invoices-title" className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-      <div className="flex items-center gap-3"><span className="rounded-xl bg-amber-50 p-2 text-amber-700"><FileText size={21} aria-hidden="true" /></span><div><h2 id="pending-invoices-title" className="text-lg font-bold">Bekleyen faturalar <span className="ml-2 rounded-full bg-slate-100 px-2 py-1 text-sm">{loading ? "…" : error && !invoices.length ? "—" : total ?? `${invoices.length}${hasMore ? "+" : ""}`}</span></h2><p className="text-sm text-slate-500">200.000 TL ve üzerindeki alış faturaları · 5 dakikada bir güncellenir</p></div></div>
+      <div className="flex items-center gap-3"><span className="rounded-xl bg-amber-50 p-2 text-amber-700"><FileText size={21} aria-hidden="true" /></span><div><h2 id="pending-invoices-title" className="text-lg font-bold">Bekleyen faturalar <span className="ml-2 rounded-full bg-slate-100 px-2 py-1 text-sm">{loading ? "…" : error && !invoices.length ? "—" : total ?? `${invoices.length}${hasMore ? "+" : ""}`}</span></h2><p className="text-sm text-slate-500">200.000 TL ve üzerindeki alış faturaları · 4 saatte bir güncellenir</p></div></div>
       <button type="button" onClick={() => setRefresh(value => value + 1)} aria-label="Bekleyen faturaları yenile" className="rounded-xl border border-slate-200 p-3 text-slate-600 hover:bg-slate-50"><RefreshCw size={18} aria-hidden="true" /></button>
     </div>
     {newIds.length > 0 && <div role="status" className="flex flex-wrap items-center justify-between gap-2 bg-emerald-50 px-5 py-3 text-sm font-bold text-emerald-800"><p>{newIds.length} adet yeni gelen fatura var</p><button type="button" onClick={markRead} className="underline">Görüldü olarak işaretle</button></div>}

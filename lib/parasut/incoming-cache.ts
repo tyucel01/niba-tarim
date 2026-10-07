@@ -1,14 +1,14 @@
 import { invoiceAdmin } from './invoice-pool';
 const inFlight = new Map<string, Promise<any>>();
-const ttl = 5 * 60 * 1000;
-export async function cachedIncomingPage(key: string, fetchPage: () => Promise<any>) {
+const ttl = 4 * 60 * 60 * 1000;
+export async function cachedIncomingPage(key: string, fetchPage: () => Promise<any>, force = false) {
   const existing = inFlight.get(key);
   if (existing) return existing;
-  const task = load(key, fetchPage);
+  const task = load(key, fetchPage, force);
   inFlight.set(key, task);
   try { return await task; } finally { inFlight.delete(key); }
 }
-async function load(key: string, fetchPage: () => Promise<any>) {
+async function load(key: string, fetchPage: () => Promise<any>, force: boolean) {
   const db = invoiceAdmin();
   const read = async () => {
     const {data,error} = await db.from('parasut_response_cache').select('payload,expires_at').eq('cache_key',key).maybeSingle();
@@ -16,8 +16,8 @@ async function load(key: string, fetchPage: () => Promise<any>) {
     return data;
   };
   let cached = await read();
-  if (cached?.payload && Date.parse(cached.expires_at) > Date.now()) return cached.payload;
-  const {data:claimed,error} = await db.rpc('claim_parasut_cache',{p_key:key});
+  if (cached?.payload && Date.parse(cached.expires_at) > Date.now() && !force) return cached.payload;
+  const {data:claimed,error} = await db.rpc(force ? 'claim_parasut_refresh' : 'claim_parasut_cache',{p_key:key});
   if (error) throw new Error('Fatura önbelleği kontrol edilemedi.');
   if (!claimed) {
     if (cached?.payload) return cached.payload;
@@ -26,7 +26,7 @@ async function load(key: string, fetchPage: () => Promise<any>) {
       cached = await read();
       if (cached?.payload) return cached.payload;
     }
-    throw new Error('Fatura listesi hazırlanıyor. Biraz sonra yenileyin.');
+    throw new Error('Fatura servisi geçici olarak beklemede. En geç 1 dakika sonra yeniden deneyin.');
   }
   try {
     const payload = await fetchPage();
@@ -35,7 +35,7 @@ async function load(key: string, fetchPage: () => Promise<any>) {
     return payload;
   } catch (cause) {
     // Cool down failed calls as well, rather than hitting Paraşüt repeatedly.
-    await db.from('parasut_response_cache').update({locked_until:new Date(Date.now()+ttl).toISOString()}).eq('cache_key',key);
+    await db.from('parasut_response_cache').update({locked_until:new Date(Date.now()+60000).toISOString()}).eq('cache_key',key);
     throw cause;
   }
 }

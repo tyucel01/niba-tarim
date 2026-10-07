@@ -213,11 +213,15 @@ function buildSalesInvoicePayload({
   customerId,
   purchaseBill,
   invoiceTons,
+  sourceLineId,
+  sourceOnly = false,
 }: {
   order: any;
   customerId: string;
   purchaseBill: any;
   invoiceTons?: number;
+  sourceLineId?: string;
+  sourceOnly?: boolean;
 }) {
   const included = purchaseBill?.included || [];
 
@@ -237,7 +241,7 @@ function buildSalesInvoicePayload({
   const purchaseTotal = toNumber(purchaseBill.data?.attributes?.net_total);
   const sourceShare = allocated / purchaseTotal;
   if (!(sourceShare > 0) || sourceShare > 1 || !Number.isFinite(sourceShare)) throw new Error("Siparişe ayrılan fatura tutarı doğrulanamadı.");
-  const sourceLines = details.map((row: any) => {
+  const allSourceLines = details.map((row: any) => {
     const attr = row.attributes || {};
     if (attr.vat_rate == null || attr.vat_rate === "" || !Number.isFinite(Number(attr.vat_rate))) throw new Error("Alış faturasında KDV oranı eksik/geçersiz. Sıfır varsayılmadı.");
     const quantity = toNumber(attr.quantity);
@@ -255,6 +259,12 @@ function buildSalesInvoicePayload({
     if (!(tons > 0)) throw new Error("Alış faturasında kg/ton dışında birim var. Teslim tonajına göre otomatik fatura oluşturulamaz.");
     return { row, quantity, tons, vatRate, net, unit, productId, name: clean(attr.description || product?.attributes?.name || attr.product_name) };
   });
+  const choices = allSourceLines.map((line: any) => ({ id: String(line.row.id || ""), name: line.name, tons: line.tons, quantity: line.quantity, unit: line.unit, vatRate: line.vatRate, amount: line.net * (1 + line.vatRate / 100) }));
+  if (choices.some((line: any) => !line.id)) throw new Error("Alış faturası kalem kimlikleri alınamadı. Faturayı yeniden yükleyin.");
+  if (sourceOnly) return { payload: null, preview: { sourceLines: choices } as any };
+  if (!sourceLineId) throw new Error("Önce alış faturasından bu siparişe ait kalemi seçin.");
+  const sourceLines = allSourceLines.filter((line: any) => String(line.row.id) === sourceLineId);
+  if (sourceLines.length !== 1) throw new Error("Seçilen kalem alış faturasında bulunamadı. Kalemleri yeniden yükleyin.");
   const sourceTons = sourceLines.reduce((sum: number, line: any) => sum + line.tons, 0);
   if (part.tons > sourceTons + .000001) throw new Error("Alış faturasının ürün miktarı teslim tonajını karşılamıyor. Faturayı kontrol edin.");
   const share = part.invoiceTons / sourceTons;
@@ -337,6 +347,7 @@ function buildSalesInvoicePayload({
       subtotal: round(subtotal),
       vatTotal: round(vatTotal),
       targetTotal,
+      sourceLineTons: sourceTons,
       invoiceTons: part.invoiceTons,
       billedTons: part.billedTons,
       remainingTons: part.remainingTons - part.invoiceTons,
@@ -346,7 +357,7 @@ function buildSalesInvoicePayload({
       sourcePurchaseTotal: purchaseTotal,
       sourceShare,
       partShare: part.partShare,
-      pricingNote: "Kalem miktarları seçilen teslim tonajına göre, ürünlerin alış faturasındaki tonaj payları korunarak hesaplandı. Birim ve KDV oranları korunur; satış fiyatı KDV dahildir. Ürünleri ve miktarları kontrol edin.",
+      pricingNote: "Yalnız seçtiğiniz alış kalemi, belirlediğiniz teslim tonajı kadar satışa alındı. Birim ve KDV oranları korunur; satış fiyatı KDV dahildir. Ürünleri ve miktarları kontrol edin.",
     },
   };
 }
@@ -418,7 +429,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!customerId) {
+    if (!customerId && !body.sourceOnly) {
       return NextResponse.json(
         {
           success: false,
@@ -467,9 +478,29 @@ export async function POST(req: NextRequest) {
       customerId,
       purchaseBill,
       invoiceTons: part.invoiceTons,
+      sourceLineId: clean(body.sourceLineId),
+      sourceOnly: Boolean(body.sourceOnly) && !confirm,
     });
 
-    const fingerprint = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+    const { data: assignments, error: assignmentError } = await supabase.from("order_purchase_line_assignments").select("order_id,line_id,source_tons,siparisler!inner(teslimOlanTonaj,matched_purchase_invoice_id)").eq("purchase_bill_id", String(order.matched_purchase_invoice_id));
+    if (assignmentError) throw new Error("Kalemlerin kalan miktarı alınamadı. Yeniden deneyin.");
+    const own = (assignments || []).find((a: any) => a.order_id === order.id);
+    const { data: priorOrders, error: priorError } = await supabase.from("siparisler").select("id,sales_invoice_id,sales_invoiced_tonnage").eq("matched_purchase_invoice_id", order.matched_purchase_invoice_id);
+    if (priorError) throw new Error("Geçmiş fatura miktarları kontrol edilemedi.");
+    const unknownUsage = (priorOrders || []).some((o: any) => (o.sales_invoice_id || Number(o.sales_invoiced_tonnage)>0) && !(assignments || []).some((a: any) => a.order_id === o.id));
+    if (body.sourceOnly && !confirm) {
+      const lines = preview.sourceLines.map((line: any) => {
+        const used = (assignments || []).filter((a: any) => a.line_id === line.id && a.order_id !== order.id && a.siparisler?.matched_purchase_invoice_id === order.matched_purchase_invoice_id).reduce((sum: number, a: any) => sum + Number(a.siparisler?.teslimOlanTonaj || 0), 0);
+        return { ...line, remainingTons: Math.max(0, line.tons-used-(own?.line_id === line.id ? Number(order.sales_invoiced_tonnage || 0) : 0)), availableForOrder: Math.max(0,line.tons-used) };
+      });
+      return NextResponse.json({success:true,sourceLines:lines,selectedLineId:own?.line_id || "",selectionLocked:Boolean(own && Number(order.sales_invoiced_tonnage)>0),warning:unknownUsage ? "Bu alış faturasının geçmiş satışlarında kullanılan kalemler kayıtlı değil. Miktarları Paraşüt üzerinde kontrol etmeden yeni fatura kesilemez." : ""});
+    }
+    if (!payload) throw new Error("Fatura kalemi seçilmedi.");
+    const usedLineTons = (assignments || []).filter((a: any) => a.line_id === clean(body.sourceLineId) && a.order_id !== order.id && a.siparisler?.matched_purchase_invoice_id === order.matched_purchase_invoice_id).reduce((sum: number,a: any)=>sum+Number(a.siparisler?.teslimOlanTonaj || 0),0);
+    if (usedLineTons + Number(order.teslimOlanTonaj || 0) > preview.sourceLineTons + .000001) throw new Error("Seçilen kalemin kalan tonajı teslim edilen sipariş için yetersiz.");
+    if (unknownUsage) throw new Error("Geçmiş satışların hangi alış kaleminden kesildiği doğrulanamadı. Paraşüt üzerinde mevcut faturaları kontrol edin; yeni fatura oluşturulmadı.");
+    if (own && Number(order.sales_invoiced_tonnage)>0 && own.line_id !== clean(body.sourceLineId)) throw new Error("Kısmen faturalanmış siparişin ürün kalemi değiştirilemez.");
+    const fingerprint = createHash("sha256").update(JSON.stringify({payload,sourceLineId:clean(body.sourceLineId)})).digest("hex");
     if (confirm && body.previewFingerprint !== fingerprint) return NextResponse.json({ success: false, error: "Fatura bilgileri önizlemeden sonra değişti. Önizlemeyi yeniden oluşturun." }, { status: 409 });
     if (!confirm) {
       return NextResponse.json({
@@ -483,7 +514,7 @@ export async function POST(req: NextRequest) {
 
     const { recipientAlias } = await getCustomerRecipientAlias(token, companyId, customerId);
     if (!recipientAlias) return NextResponse.json({success:false,error:"Müşterinin e-fatura posta kutusu bulunamadı. Fatura oluşturulmadı; cari kartı kontrol edin."},{status:400});
-    const { data: reservationId, error: reserveError } = await supabase.rpc("reserve_order_sales_part", {p_order_id:siparisId,p_tons:part.invoiceTons,p_amount:preview.estimatedTotal,p_customer_id:customerId,p_fingerprint:fingerprint});
+    const { data: reservationId, error: reserveError } = await supabase.rpc("reserve_order_sales_line_part", {p_line_id:clean(body.sourceLineId),p_source_tons:preview.sourceLineTons,p_order_id:siparisId,p_tons:part.invoiceTons,p_amount:preview.estimatedTotal,p_customer_id:customerId,p_fingerprint:fingerprint});
     if (reserveError) return NextResponse.json({success:false,error:reserveError.message},{status:409});
 
     const created = await parasutPost(

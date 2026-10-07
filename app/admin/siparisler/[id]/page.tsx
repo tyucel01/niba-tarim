@@ -2,7 +2,7 @@
 
 import { salesProgress, purchaseAllocation } from "@/lib/orders/sales-progress";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import SevkForm from "../sevk-form";
 import { orderStage, stageLabels } from "@/lib/orders/workflow";
@@ -20,6 +20,8 @@ export default function SiparisDetayPage() {
   }, []);
   const [siparis, setSiparis] = useState<any>(null);
 
+  const invoiceRequest = useRef(0);
+  const invoiceAbort = useRef<AbortController | null>(null);
   const [purchaseInvoices, setPurchaseInvoices] = useState<any[]>([]);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [nextInvoicePage, setNextInvoicePage] = useState<number | null>(null);
@@ -63,42 +65,32 @@ export default function SiparisDetayPage() {
     }
   }
 
-  async function loadPurchaseInvoices(page = 1) {
+  async function loadPurchaseInvoices(page = 1, force = false) {
+    if (!selectedSupplierId) return;
+    const taxNo = getContactTaxNo(contacts.find(contact => String(contact.id) === selectedSupplierId));
+    if (!taxNo) { setInvoiceError("Seçili cari kartta VKN/TCKN eksik. Cari kartı kontrol edin."); return; }
+    invoiceAbort.current?.abort();
+    const controller = new AbortController();
+    invoiceAbort.current = controller;
+    const requestId = ++invoiceRequest.current;
+    const rows: any[] = [];
+    let nextPage: number | null = page;
     try {
-      setLoadingInvoices(true);
-      setInvoiceError("");
-
-      const res = await fetch(`/api/admin/parasut/gelen-faturalar?page=${page}`, {
-        cache: "no-store",
-      });
-
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok || !data?.success) {
-        setInvoiceError("Gelen faturalar alınamadı. Yeniden deneyin.");
-        setPurchaseInvoices([]);
-        return;
+      setLoadingInvoices(true); setInvoiceError("");
+      if (page === 1) { setPurchaseInvoices([]); setNextInvoicePage(null); }
+      for (let pages=0;nextPage && pages<5;pages++) {
+        const res: Response = await fetch(`/api/admin/parasut/gelen-faturalar?page=${nextPage}&taxNo=${encodeURIComponent(taxNo)}&supplierId=${encodeURIComponent(selectedSupplierId)}${force ? "&refresh=1" : ""}`, {cache:"no-store",signal:controller.signal});
+        const data: any = await res.json().catch(()=>null);
+        if (!res.ok || !data?.success) throw new Error(typeof data?.error === "string" ? data.error : "Gelen faturalar alınamadı. Yeniden deneyin.");
+        rows.push(...(Array.isArray(data.invoices)?data.invoices:[]));
+        nextPage=data.nextPage??null;
       }
-
-      const rawInvoices =
-        data.invoices ||
-        data.rows ||
-        data.data ||
-        data.items ||
-        data.purchaseInvoices ||
-        [];
-
-      setPurchaseInvoices(previous => {
-        const incoming = Array.isArray(rawInvoices) ? rawInvoices : [];
-        return page === 1 ? incoming : [...previous, ...incoming.filter((row: any) => !previous.some(old => String(old.id) === String(row.id)))];
-      });
-      setNextInvoicePage(data.nextPage ?? null);
-    } catch {
-      setInvoiceError("Gelen faturalar yüklenemedi.");
-      setPurchaseInvoices([]);
-    } finally {
-      setLoadingInvoices(false);
-    }
+      if (controller.signal.aborted || requestId!==invoiceRequest.current) return;
+      setPurchaseInvoices(previous => Array.from(new Map((page===1?rows:[...previous,...rows]).map(row=>[String(row.id),row])).values()));
+      setNextInvoicePage(nextPage);
+    } catch (error) {
+      if (!controller.signal.aborted && requestId===invoiceRequest.current) setInvoiceError(error instanceof Error ? error.message : "Gelen faturalar yüklenemedi.");
+    } finally { if (requestId===invoiceRequest.current) setLoadingInvoices(false); }
   }
 
   async function loadContacts() {
@@ -260,9 +252,14 @@ export default function SiparisDetayPage() {
 
   useEffect(() => {
     if (!siparis?.id || stage !== "fatura") return;
-    loadPurchaseInvoices();
     loadContacts();
   }, [siparis?.id, stage]);
+
+  useEffect(() => {
+    setPurchaseInvoices([]); setNextInvoicePage(null); setInvoiceError(""); setInvoiceDetails({}); setOpenInvoiceDetails({}); setLoadingInvoices(false);
+    if (siparis?.id && stage === "fatura" && selectedSupplierId) void loadPurchaseInvoices();
+    return () => { invoiceAbort.current?.abort(); invoiceRequest.current++; };
+  }, [siparis?.id, stage, selectedSupplierId]);
 
   const calc = useMemo(() => {
     const alisFiyati = numberValue(siparis?.alisFiyati);
@@ -302,7 +299,7 @@ export default function SiparisDetayPage() {
     }).filter(candidate => candidate.score >= 60).sort((a,b) => b.score - a.score);
     if (!candidates.length || candidates[1]?.score === candidates[0].score) return null;
     return candidates[0];
-  }, [siparis, purchaseInvoices, contacts]);
+  }, [siparis, contacts]);
 
   useEffect(() => {
     if (selectedSupplierId) return;
@@ -543,13 +540,15 @@ export default function SiparisDetayPage() {
                 </div>
               )}
 
-              {invoiceError && <div role="alert" className="mb-4 rounded-xl bg-red-50 p-4 text-red-700">{invoiceError} <button type="button" onClick={() => loadPurchaseInvoices()} className="underline">Yeniden dene</button></div>}
-              {loadingInvoices ? (
+              {invoiceError && <div role="alert" className="mb-4 rounded-xl bg-red-50 p-4 text-red-700">{invoiceError} <button type="button" onClick={() => loadPurchaseInvoices(1,true)} className="underline">Yeniden dene</button></div>}
+              {!selectedContact ? (
+                <EmptyBox text="Önce soldan tedarikçi cari kartını seçin. Ardından bu carinin faturaları yüklenecek." />
+              ) : invoiceError ? null : loadingInvoices ? (
                 <EmptyBox text="Faturalar yükleniyor..." />
               ) : !selectedContact ? (
                 <EmptyBox text="Önce tedarikçi cari kart seç." />
               ) : filteredInvoices.length === 0 ? (
-                <EmptyBox text="Seçili cariye ait gelen e-fatura bulunamadı." />
+                <EmptyBox text={nextInvoicePage ? "Bu tarih aralığında seçili cariye ait fatura yok. Daha eski faturaları yükleyebilirsiniz." : "Seçili cariye ait gelen e-fatura bulunamadı."} />
               ) : (
                 <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
                   {filteredInvoices.map((invoice) => {
