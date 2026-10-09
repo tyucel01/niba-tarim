@@ -11,13 +11,13 @@ export async function reusableInvoices() {
   const ids = pool.map(invoice => invoice.purchase_bill_id).filter(Boolean);
   let orders: any[] = [];
   for (let start = 0; ; start += 1000) {
-    const { data, error: usageError } = await db.from("siparisler").select("matched_purchase_invoice_id,matched_purchase_allocated_amount,matched_purchase_invoice_total,teslimOlanTonaj,alisFiyati,sales_invoice_id,sales_invoice_history").in("matched_purchase_invoice_id", ids).range(start, start + 999);
+    const { data, error: usageError } = await db.from("siparisler").select("matched_purchase_invoice_id,matched_purchase_allocated_amount,matched_purchase_invoice_total,teslimOlanTonaj,alisFiyati,sales_invoice_id,sales_invoice_history,purchase_difference_mode,purchase_difference_amount").in("matched_purchase_invoice_id", ids).range(start, start + 999);
     if (usageError) throw new Error("Faturaya ayrılan tutarlar okunamadı.");
     orders = orders.concat(data || []);
     if (!data || data.length < 1000) break;
   }
   return pool.map(invoice => {
-    const used = orders.filter(order => order.matched_purchase_invoice_id === invoice.purchase_bill_id).reduce((sum, order) => sum + purchaseAllocation(order), 0);
+    const used = orders.filter(order => order.matched_purchase_invoice_id === invoice.purchase_bill_id).reduce((sum, order) => sum + purchaseAllocation(order) + (order.purchase_difference_mode === "refund" ? Number(order.purchase_difference_amount || 0) : 0), 0);
     const remaining = Math.round((Number(invoice.total) - used) * 100) / 100;
     return { id: invoice.e_invoice_id, purchase_bill_id: invoice.purchase_bill_id, reusable: true, supplier_id: invoice.supplier_id, supplier_name: invoice.supplier_name, from_vkn: invoice.supplier_tax_no,
       allocated_amount: Math.round(used * 100) / 100, remaining_amount: remaining,

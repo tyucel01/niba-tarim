@@ -1,4 +1,5 @@
 "use client";
+import { supabase } from "@/lib/supabase";
 import { usePanelDialog } from "@/app/admin/ui/panel-dialog";
 
 import { salesProgress, purchaseAllocation } from "@/lib/orders/sales-progress";
@@ -33,6 +34,40 @@ export default function SiparisDetayPage() {
   const [detailLoading, setDetailLoading] = useState("");
   const [detailError, setDetailError] = useState<Record<string, string>>({});
   const [matchingInvoice, setMatchingInvoice] = useState(false);
+  const [differenceModes, setDifferenceModes] = useState<Record<string, string>>({});
+  const [refundPreview, setRefundPreview] = useState<any>(null);
+  const [refundVatRate, setRefundVatRate] = useState("");
+  const [refundBusy, setRefundBusy] = useState(false);
+  const [refundError, setRefundError] = useState("");
+  async function invoiceHeaders() {
+    const {data:{session}} = await supabase.auth.getSession();
+    if (!session) throw new Error("Oturum açmanız gerekiyor.");
+    return {"Content-Type":"application/json", Authorization:`Bearer ${session.access_token}`};
+  }
+  async function previewRefund() {
+    setRefundBusy(true); setRefundError("");
+    try {
+      const response = await fetch(`/api/admin/parasut/purchase-refund?orderId=${encodeURIComponent(siparis.id)}`, {cache:"no-store",headers:await invoiceHeaders()});
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || "İade bilgileri alınamadı.");
+      setRefundPreview(data); setRefundVatRate(data.vatRates.length===1 ? String(data.vatRates[0]) : "");
+    } catch(error) { setRefundError(error instanceof Error ? error.message : "İade bilgileri alınamadı."); }
+    finally { setRefundBusy(false); }
+  }
+  async function createRefund() {
+    if (refundBusy || !refundPreview || refundVatRate === "") return;
+    if (!(await panelConfirm(`${refundPreview.supplierName || "Tedarikçi"} için ${formatMoney(refundPreview.amount)} (KDV dahil) fiyat farkı iadesi oluşturulacak.\nKaynak fatura: ${refundPreview.invoiceNo || "-"}\nKDV oranı: %${refundVatRate}\nParaşüt'te alış iade kaydı oluşturulur. e-Fatura olarak resmileştirmeyi Paraşüt ekranından tamamlayın.\nBu şekilde ilerlemek istediğinizden emin misiniz?`))) return;
+    setRefundBusy(true); setRefundError("");
+    try {
+      const response = await fetch("/api/admin/parasut/purchase-refund",{method:"POST",headers:await invoiceHeaders(),body:JSON.stringify({orderId:siparis.id,amount:refundPreview.amount,vatRate:Number(refundVatRate),confirm:true})});
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || "İade oluşturulamadı.");
+      setRefundPreview({...refundPreview,refundId:data.refundId,refundUrl:data.refundUrl,state:"verified"});
+      await loadOrder();
+      await panelAlert(`${formatMoney(data.amount ?? refundPreview.amount)} tutarındaki alış iade kaydı oluşturuldu. e-Fatura olarak resmileştirmek için Paraşüt'te açın.`);
+    } catch(error) {setRefundError(error instanceof Error ? error.message : "İade oluşturulamadı.");await loadOrder();}
+    finally {setRefundBusy(false);}
+  }
 
   const [contacts, setContacts] = useState<any[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(false);
@@ -195,10 +230,11 @@ export default function SiparisDetayPage() {
     const detail = invoiceDetails[String(invoice.id)];
     if (!detail) { await panelAlert("Önce fatura detayını açıp kontrol edin."); return; }
     const available = invoice.remaining_amount ?? detail.net_total;
-    if (numberValue(available) < calc.toplamAlisTutari) { await panelAlert("Faturanın kalan tutarı bu sipariş için yetersiz."); return; }
-    const confirmText = selectedContact
-      ? `${getContactName(selectedContact)}\nFatura: ${getInvoiceNo(invoice)}\nFatura tutarı: ${formatInvoiceMoney(detail.net_total, detail.currency)}\nSiparişten beklenen: ${formatMoney(calc.toplamAlisTutari)}\nBu siparişe ayrılacak: ${formatMoney(calc.toplamAlisTutari)}\nFaturada kalacak: ${formatInvoiceMoney(numberValue(available) - calc.toplamAlisTutari, detail.currency)}\nFatura kalemlerini ve tutarı kontrol ettiniz mi? Giderleştirmeyi onaylıyor musunuz?`
-      : "Seçilen cari karta gider kaydı atılacak. Onaylıyor musun?";
+    if (!["TRL","TRY"].includes(detail.currency) || !(numberValue(available)>0)) { await panelAlert("Pozitif TL fatura tutarı doğrulanamadı."); return; }
+    const difference = Math.round((numberValue(available)-calc.toplamAlisTutari)*100)/100;
+    const differenceMode = difference < 0 ? "accept" : differenceModes[String(invoice.id)] || "keep";
+    const outcome = differenceMode === "refund" ? "Fazla tutar bu satışta iade için ayrılacak. Eşleştirme sonrası fark iadesini oluşturabilirsiniz." : differenceMode === "accept" ? "Fark kabul edilerek faturanın kalan tutarının tamamı bu satışa bağlanacak." : "Sipariş tutarı ayrılacak; kalan tutar başka siparişlerde kullanılabilecek.";
+    const confirmText = `${getContactName(selectedContact)}\nFatura: ${getInvoiceNo(invoice)}\nFatura tutarı: ${formatInvoiceMoney(detail.net_total, detail.currency)}\nKullanılabilir tutar: ${formatMoney(available)}\nSiparişten beklenen: ${formatMoney(calc.toplamAlisTutari)}\nFark: ${formatMoney(Math.abs(difference))} ${difference < 0 ? "eksik" : difference > 0 ? "fazla" : "(eşit)"}\n${outcome}\nBu şekilde ilerlemek istediğinizden emin misiniz?`;
 
     if (!(await panelConfirm(confirmText))) return;
 
@@ -207,13 +243,14 @@ export default function SiparisDetayPage() {
 
       const res = await fetch("/api/admin/parasut/e-invoice/import-and-match", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: await invoiceHeaders(),
         body: JSON.stringify({
           siparisId: siparis.id,
           eInvoiceId: invoice.id,
           supplierId: selectedSupplierId,
+          differenceMode,
+          confirmedAvailable: numberValue(available),
+          confirmedExpected: Math.round(calc.toplamAlisTutari*100)/100,
         }),
       });
 
@@ -542,6 +579,19 @@ export default function SiparisDetayPage() {
                 </div>
               )}
 
+              {siparis.purchase_difference_confirmed_at && siparis.purchase_difference_mode !== "keep" && <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
+                <p className="font-bold">Onaylanan fatura farkı: {formatMoney(Math.abs(numberValue(siparis.purchase_difference_amount)))} {numberValue(siparis.purchase_difference_amount)<0 ? "eksik" : "fazla"}</p>
+                <p className="mt-1">{siparis.purchase_difference_mode === "refund" ? "Fazla tutar iade için ayrıldı." : "Fark kabul edilerek bu satışa bağlandı."}</p>
+                {numberValue(siparis.purchase_difference_amount)>0 && <div className="mt-3">
+                  {siparis.purchase_refund_id ? <p className="font-bold">İade kaydı: {siparis.purchase_refund_id} {siparis.purchase_refund_state !== "verified" && "· Paraşüt'te kontrol edin"}</p> : siparis.purchase_refund_state && siparis.purchase_refund_state !== "pending" ? <p role="alert">İade işlemi kontrol bekliyor. Paraşüt kayıtlarını kontrol edin; tekrar oluşturulmaz.</p> : <button type="button" disabled={refundBusy} onClick={previewRefund} className="rounded-lg bg-amber-800 px-4 py-3 font-bold text-white">{refundBusy ? "İade bilgileri yükleniyor…" : "Bu satıştan fark iadesi oluştur"}</button>}
+                  {refundPreview && <div className="mt-3 space-y-3 rounded-lg bg-white p-3">
+                    <p>Tedarikçi: {refundPreview.supplierName} · Kaynak: {refundPreview.invoiceNo}</p><p className="font-bold">KDV dahil iade tutarı: {formatMoney(refundPreview.amount)}</p>
+                    {refundPreview.refundUrl ? <a href={refundPreview.refundUrl} target="_blank" rel="noopener noreferrer" className="inline-block font-bold text-emerald-800 underline">İade kaydını Paraşüt'te aç ve resmileştir</a> : <><label className="block">Farka ait kaynak KDV oranı<select value={refundVatRate} onChange={event=>setRefundVatRate(event.target.value)} className="ml-2 rounded-lg border p-2"><option value="">KDV oranı seçin</option>{refundPreview.vatRates.map((rate:number)=><option key={rate} value={rate}>%{rate}</option>)}</select></label><button type="button" disabled={refundBusy || refundVatRate === ""} onClick={createRefund} className="rounded-lg bg-emerald-700 px-4 py-3 font-bold text-white disabled:opacity-50">{refundBusy ? "İade oluşturuluyor…" : "Fark iadesini onayla ve oluştur"}</button></>}
+                  </div>}
+                  {siparis.purchase_refund_id && !refundPreview && <button type="button" disabled={refundBusy} onClick={previewRefund} className="mt-2 font-bold underline">Paraşüt iade kaydını göster</button>}
+                  {refundError && <p role="alert" className="mt-3 text-red-700">{refundError}</p>}
+                </div>}
+              </div>}
               {invoiceError && <div role="alert" className="mb-4 rounded-xl bg-red-50 p-4 text-red-700">{invoiceError} <button type="button" onClick={() => loadPurchaseInvoices(1,true)} className="underline">Yeniden dene</button></div>}
               {!selectedContact ? (
                 <EmptyBox text="Önce soldan tedarikçi cari kartını seçin. Ardından bu carinin faturaları yüklenecek." />
@@ -562,6 +612,8 @@ export default function SiparisDetayPage() {
                     const currency = detail?.currency || invoice.attributes?.currency || "TRL";
                     const taxMatches = Boolean(vkn && vkn === getContactTaxNo(selectedContact));
                     const rowMatch = findBestContactMatch(siparis, invoice, contacts);
+                    const available = numberValue(invoice.remaining_amount ?? total);
+                    const difference = Math.round((available-calc.toplamAlisTutari)*100)/100;
 
                     return (
                       <div
@@ -610,9 +662,17 @@ export default function SiparisDetayPage() {
                           </div>}
                           </div>}
                         </div>
+                        {detail && Math.abs(difference) >= .01 && <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
+                          <p className="font-bold">Kullanılabilir tutar siparişten {formatMoney(Math.abs(difference))} {difference < 0 ? "eksik" : "fazla"}.</p>
+                          {difference < 0 ? <p className="mt-2">Eksik tutarı kabul ederek onayla ilerleyebilirsiniz. Alış faturası gerçek tutarıyla kaydedilir.</p> : <label className="mt-3 block">Fazla tutar için işlem
+                            <select disabled={matchingInvoice} value={differenceModes[String(invoice.id)] || "keep"} onChange={event=>setDifferenceModes(previous=>({...previous,[String(invoice.id)]:event.target.value}))} className="mt-2 w-full rounded-lg border border-amber-200 bg-white p-3">
+                              <option value="keep">Kalan tutarı diğer siparişlerde kullan</option><option value="accept">Farkı kabul et ve bu satışa bağla</option><option value="refund">Farkı tedarikçiye iade için ayır</option>
+                            </select>
+                          </label>}
+                        </div>}
                         <button
                           type="button"
-                          disabled={matchingInvoice || calc.teslimOlanTonaj <= 0 || calc.toplamAlisTutari <= 0 || !selectedSupplierId || !taxMatches || !detail?.details?.length || detail?.net_total == null || (invoice.remaining_amount != null && numberValue(invoice.remaining_amount) < calc.toplamAlisTutari)}
+                          disabled={matchingInvoice || calc.teslimOlanTonaj <= 0 || calc.toplamAlisTutari <= 0 || !selectedSupplierId || !taxMatches || !detail?.details?.length || detail?.net_total == null || !["TRL", "TRY"].includes(currency) || available <= 0}
                           onClick={() => matchInvoice(invoice)}
                           className={`mt-4 w-full rounded-xl px-4 py-3 text-xs font-black transition ${
                             selectedSupplierId

@@ -5,6 +5,7 @@ export function deliveryTotals(order: any) {
   return { tons, salesTotal, purchaseTotal };
 }
 export function purchaseAllocation(order: any) {
+  if (['accept', 'refund'].includes(order.purchase_difference_mode)) return Number(order.matched_purchase_allocated_amount || 0);
   const legacy = order.sales_invoice_id && (!Array.isArray(order.sales_invoice_history) || order.sales_invoice_history.some((row: any) => row.state === 'legacy'));
   const delivery = deliveryTotals(order);
   // Preserve consumed historical bills and unknown deliveries; never release them speculatively.

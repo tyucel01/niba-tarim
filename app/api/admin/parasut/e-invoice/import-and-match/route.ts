@@ -1,3 +1,4 @@
+import { authorizeWhatsApp } from "@/lib/whatsapp/admin";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -493,6 +494,7 @@ async function verifyPurchaseBill(
 
 export async function POST(req: NextRequest) {
   try {
+    const denied = await authorizeWhatsApp(req, supabase); if (denied) return denied;
     const companyId = process.env.PARASUT_COMPANY_ID;
 
     if (!companyId) {
@@ -507,6 +509,11 @@ export async function POST(req: NextRequest) {
     const siparisId = clean(body?.siparisId);
     const eInvoiceId = clean(body?.eInvoiceId || body?.invoiceId);
     const supplierId = clean(body?.supplierId);
+    const differenceMode = clean(body?.differenceMode || "keep");
+    const confirmedAvailable = Number(body?.confirmedAvailable);
+    const confirmedExpected = Number(body?.confirmedExpected);
+    if (!["keep", "accept", "refund"].includes(differenceMode) || !Number.isFinite(confirmedAvailable) || !Number.isFinite(confirmedExpected) || confirmedAvailable <= 0 || confirmedExpected <= 0) return NextResponse.json({ success: false, error: "Fatura ve sipariş tutarını kontrol ederek tekrar onaylayın." }, { status: 422 });
+    const allocationArgs = { p_order_id: siparisId, p_e_invoice_id: eInvoiceId, p_mode: differenceMode, p_confirmed_available: confirmedAvailable, p_confirmed_expected: confirmedExpected };
 
     if (!siparisId) {
       return NextResponse.json(
@@ -576,7 +583,7 @@ if (existingOrder?.matched_purchase_invoice_id) {
         if (recoveredError) throw new Error("Gider kaydı doğrulandı fakat takip kaydı güncellenemedi.");
         Object.assign(storedInvoice, recovered);
       }
-      const { data: allocation, error: allocationError } = await supabase.rpc("allocate_purchase_invoice", { p_order_id: siparisId, p_e_invoice_id: eInvoiceId });
+      const { data: allocation, error: allocationError } = await supabase.rpc("allocate_purchase_invoice_difference", allocationArgs);
       if (allocationError) return NextResponse.json({ success: false, error: allocationError.message }, { status: 409 });
       return NextResponse.json({ success: true, reused: true, purchaseBillId: storedInvoice.purchase_bill_id, purchaseBillNo: storedInvoice.invoice_no, purchaseBillTotal: storedInvoice.total, ...allocation });
     }
@@ -594,7 +601,10 @@ if (existingOrder?.matched_purchase_invoice_id) {
     const previewData = await previewResponse.json().catch(() => null);
     const previewTotal = toNumber(previewData?.data?.attributes?.net_total);
     const expected = toNumber(existingOrder?.alisFiyati) * toNumber(existingOrder?.teslimOlanTonaj);
-    if (!previewResponse.ok || expected <= 0 || previewTotal < expected || !["TRL","TRY"].includes(previewData?.data?.attributes?.currency)) return NextResponse.json({ success: false, error: "Fatura tutarı sipariş alış tutarını karşılamıyor veya TL tutarı doğrulanamadı." }, { status: 422 });
+    if (!previewResponse.ok || expected <= 0 || previewTotal <= 0 || !["TRL","TRY"].includes(previewData?.data?.attributes?.currency)) return NextResponse.json({ success: false, error: "Fatura tutarı sipariş alış tutarını karşılamıyor veya TL tutarı doğrulanamadı." }, { status: 422 });
+    const difference = Math.round((previewTotal - expected) * 100) / 100;
+    if (Math.round(previewTotal * 100) !== Math.round(confirmedAvailable * 100) || Math.round(expected * 100) !== Math.round(confirmedExpected * 100)) return NextResponse.json({success:false,error:"Fatura veya sipariş tutarı değişti. Listeyi yenileyip yeniden onaylayın."},{status:409});
+    if ((difference < 0 && differenceMode !== "accept") || (differenceMode === "refund" && difference <= 0)) return NextResponse.json({success:false,error:"Fatura farkı için uygun işlemi seçip onaylayın."},{status:422});
     const { error: reserveError } = await supabase.from("purchase_invoice_pool").insert({ e_invoice_id: eInvoiceId, supplier_id: supplierId, supplier_name: supplierIdentity.data?.attributes?.name, supplier_tax_no: supplierTax, total: previewTotal, currency: previewData.data.attributes.currency });
     if (reserveError) return NextResponse.json({ success: false, error: "Bu fatura için işlem zaten başlatılmış olabilir. Listeyi yenileyin; tekrar gider kaydı oluşturulmadı." }, { status: 409 });
 
@@ -749,7 +759,7 @@ const purchaseBillPayload = await buildPurchaseBillPayload(
     // Keep the imported bill available even if allocating to the order fails.
     const { error: readyError } = await supabase.from("purchase_invoice_pool").update({ purchase_bill_id: purchaseBillId, invoice_no: purchaseBillNo, total: purchaseBillTotal, state: "ready", issue_date: convertData.data?.attributes?.issue_date || null }).eq("e_invoice_id", eInvoiceId);
     if (readyError) return NextResponse.json({ success: false, error: "Gider kaydı oluştu, fatura takip kaydı güncellenemedi. Tekrar giderleştirmeyin.", purchaseBillId }, { status: 500 });
-    const { data: allocation, error: updateError } = await supabase.rpc("allocate_purchase_invoice", { p_order_id: siparisId, p_e_invoice_id: eInvoiceId });
+    const { data: allocation, error: updateError } = await supabase.rpc("allocate_purchase_invoice_difference", allocationArgs);
     const updatedOrder = allocation?.order;
 
     if (updateError) {
