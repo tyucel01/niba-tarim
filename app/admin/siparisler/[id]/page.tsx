@@ -36,7 +36,9 @@ export default function SiparisDetayPage() {
   const [matchingInvoice, setMatchingInvoice] = useState(false);
   const [differenceModes, setDifferenceModes] = useState<Record<string, string>>({});
   const [refundPreview, setRefundPreview] = useState<any>(null);
-  const [refundVatRate, setRefundVatRate] = useState("");
+  const [refundReturnType,setRefundReturnType] = useState("price");
+  const [refundQuantity,setRefundQuantity] = useState("");
+  const [refundSourceLineId, setRefundSourceLineId] = useState("");
   const [refundBusy, setRefundBusy] = useState(false);
   const [refundError, setRefundError] = useState("");
   async function invoiceHeaders() {
@@ -50,22 +52,38 @@ export default function SiparisDetayPage() {
       const response = await fetch(`/api/admin/parasut/purchase-refund?orderId=${encodeURIComponent(siparis.id)}`, {cache:"no-store",headers:await invoiceHeaders()});
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || "İade bilgileri alınamadı.");
-      setRefundPreview(data); setRefundVatRate(data.vatRates.length===1 ? String(data.vatRates[0]) : "");
+      setRefundPreview(data); setRefundReturnType("price"); setRefundQuantity(""); setRefundSourceLineId(data.sourceLines.length===1 ? String(data.sourceLines[0].id) : "");
     } catch(error) { setRefundError(error instanceof Error ? error.message : "İade bilgileri alınamadı."); }
     finally { setRefundBusy(false); }
   }
   async function createRefund() {
-    if (refundBusy || !refundPreview || refundVatRate === "") return;
-    if (!(await panelConfirm(`${refundPreview.supplierName || "Tedarikçi"} için ${formatMoney(refundPreview.amount)} (KDV dahil) fiyat farkı iadesi oluşturulacak.\nKaynak fatura: ${refundPreview.invoiceNo || "-"}\nKDV oranı: %${refundVatRate}\nParaşüt'te alış iade kaydı oluşturulur. e-Fatura olarak resmileştirmeyi Paraşüt ekranından tamamlayın.\nBu şekilde ilerlemek istediğinizden emin misiniz?`))) return;
+    if (refundBusy || !refundPreview || refundSourceLineId === "") return;
+    const sourceLine = refundPreview.sourceLines.find((line:any)=>line.id===refundSourceLineId);
+    if (!sourceLine) return;
+    if (!(await panelConfirm(`${refundPreview.supplierName || "Tedarikçi"} için ${formatMoney(refundPreview.amount)} (KDV dahil) fiyat farkı iadesi oluşturulacak.\nKaynak fatura: ${refundPreview.invoiceNo || "-"}\nİade türü: ${refundReturnType === "price" ? "Fiyat farkı" : "Ürün / fazla tonaj"}\nÜrün/hizmet: ${refundReturnType === "price" ? "Fiyat farkı" : sourceLine.name}\nMiktar: ${refundReturnType === "price" ? "1" : refundQuantity+" "+sourceLine.unit}\nİlgili alış ürünü: ${sourceLine.name}\nKDV oranı: %${sourceLine.vatRate}\nİstisna kodu: ${sourceLine.exemptionCode || "Yok"}\nTedarikçiye satış faturası oluşturulur. Oluşturulduktan sonra bu satıştan e-Fatura olarak resmileştirip gönderebilirsiniz.\nBu şekilde ilerlemek istediğinizden emin misiniz?`))) return;
     setRefundBusy(true); setRefundError("");
     try {
-      const response = await fetch("/api/admin/parasut/purchase-refund",{method:"POST",headers:await invoiceHeaders(),body:JSON.stringify({orderId:siparis.id,amount:refundPreview.amount,vatRate:Number(refundVatRate),confirm:true})});
+      const response = await fetch("/api/admin/parasut/purchase-refund",{method:"POST",headers:await invoiceHeaders(),body:JSON.stringify({orderId:siparis.id,amount:refundPreview.amount,sourceLineId:sourceLine.id,vatRate:sourceLine.vatRate,exemptionCode:sourceLine.exemptionCode,returnType:refundReturnType,quantity:refundReturnType === "price" ? 1 : Number(refundQuantity),confirm:true})});
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || "İade oluşturulamadı.");
-      setRefundPreview({...refundPreview,refundId:data.refundId,refundUrl:data.refundUrl,state:"verified"});
+      setRefundPreview({...refundPreview,refundId:data.refundId,refundUrl:data.refundUrl,state:"verified",issueState:"pending",savedSource:{...sourceLine,returnType:refundReturnType,quantity:refundReturnType === "price" ? 1 : Number(refundQuantity)}});
       await loadOrder();
-      await panelAlert(`${formatMoney(data.amount ?? refundPreview.amount)} tutarındaki alış iade kaydı oluşturuldu. e-Fatura olarak resmileştirmek için Paraşüt'te açın.`);
+      await panelAlert(`${formatMoney(data.amount ?? refundPreview.amount)} tutarındaki iade satış faturası oluşturuldu. Aynı satıştaki e-Fatura olarak resmileştir ve gönder düğmesini kullanabilirsiniz.`);
     } catch(error) {setRefundError(error instanceof Error ? error.message : "İade oluşturulamadı.");await loadOrder();}
+    finally {setRefundBusy(false);}
+  }
+
+  async function issueRefund() {
+    const source = refundPreview?.savedSource;
+    if (!source || refundBusy) return;
+    if (!(await panelConfirm(`Tedarikçiye ait iade satış faturası e-Fatura olarak gönderilecek.\nKDV: %${source.vatRate} · İstisna kodu: ${source.exemptionCode || "Yok"}\nOnaylıyor musunuz?`))) return;
+    setRefundBusy(true);setRefundError("");
+    try {
+      const response = await fetch("/api/admin/parasut/purchase-refund",{method:"POST",headers:await invoiceHeaders(),body:JSON.stringify({orderId:siparis.id,issue:true,confirm:true,vatRate:source.vatRate,exemptionCode:source.exemptionCode})});
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || "e-Fatura gönderimi başlatılamadı.");
+      setRefundPreview({...refundPreview,issueState:"submitted"});await loadOrder();await panelAlert("İade satış faturası için e-Fatura gönderimi başlatıldı. Son durumu Paraşüt'ten takip edebilirsiniz.");
+    } catch(error) {setRefundError(error instanceof Error ? error.message : "e-Fatura gönderimi başlatılamadı.");await loadOrder();}
     finally {setRefundBusy(false);}
   }
 
@@ -586,7 +604,9 @@ export default function SiparisDetayPage() {
                   {siparis.purchase_refund_id ? <p className="font-bold">İade kaydı: {siparis.purchase_refund_id} {siparis.purchase_refund_state !== "verified" && "· Paraşüt'te kontrol edin"}</p> : siparis.purchase_refund_state && siparis.purchase_refund_state !== "pending" ? <p role="alert">İade işlemi kontrol bekliyor. Paraşüt kayıtlarını kontrol edin; tekrar oluşturulmaz.</p> : <button type="button" disabled={refundBusy} onClick={previewRefund} className="rounded-lg bg-amber-800 px-4 py-3 font-bold text-white">{refundBusy ? "İade bilgileri yükleniyor…" : "Bu satıştan fark iadesi oluştur"}</button>}
                   {refundPreview && <div className="mt-3 space-y-3 rounded-lg bg-white p-3">
                     <p>Tedarikçi: {refundPreview.supplierName} · Kaynak: {refundPreview.invoiceNo}</p><p className="font-bold">KDV dahil iade tutarı: {formatMoney(refundPreview.amount)}</p>
-                    {refundPreview.refundUrl ? <a href={refundPreview.refundUrl} target="_blank" rel="noopener noreferrer" className="inline-block font-bold text-emerald-800 underline">İade kaydını Paraşüt'te aç ve resmileştir</a> : <><label className="block">Farka ait kaynak KDV oranı<select value={refundVatRate} onChange={event=>setRefundVatRate(event.target.value)} className="ml-2 rounded-lg border p-2"><option value="">KDV oranı seçin</option>{refundPreview.vatRates.map((rate:number)=><option key={rate} value={rate}>%{rate}</option>)}</select></label><button type="button" disabled={refundBusy || refundVatRate === ""} onClick={createRefund} className="rounded-lg bg-emerald-700 px-4 py-3 font-bold text-white disabled:opacity-50">{refundBusy ? "İade oluşturuluyor…" : "Fark iadesini onayla ve oluştur"}</button></>}
+                    {refundPreview.refundUrl ? <div className="space-y-3"><a href={refundPreview.refundUrl} target="_blank" rel="noopener noreferrer" className="inline-block font-bold text-emerald-800 underline">İade satış faturasını Paraşüt’te aç</a>{refundPreview.savedSource && <p>KDV: %{refundPreview.savedSource.vatRate} · İstisna kodu: {refundPreview.savedSource.exemptionCode || "Yok"}</p>}{refundPreview.issueState === "pending" && <button type="button" disabled={refundBusy} onClick={issueRefund} className="block rounded-lg bg-emerald-700 px-4 py-3 font-bold text-white">e-Fatura olarak resmileştir ve gönder</button>}{refundPreview.issueState === "submitted" && <p>e-Fatura gönderimi başlatıldı.</p>}{refundPreview.issueState === "sending" && <p>e-Fatura işlemi kontrol bekliyor. Paraşüt’ten kontrol edin.</p>}</div> : <><label className="block">Farkın ait olduğu alış ürünü<select value={refundSourceLineId} onChange={event=>{setRefundSourceLineId(event.target.value);const line=refundPreview.sourceLines.find((line:any)=>line.id===event.target.value);if(line?.unitPrice) setRefundQuantity(String(Number((refundPreview.amount/(line.unitPrice*(1-Number(line.discountRate || 0)/100)*(1+line.vatRate/100))).toFixed(6))));}} className="mt-2 w-full rounded-lg border p-2"><option value="">Alış ürünü seçin</option>{refundPreview.sourceLines.map((line:any)=><option key={line.id} value={line.id}>{line.name} · KDV %{line.vatRate} · İstisna: {line.exemptionCode || "Yok"}</option>)}</select></label><label className="block">İade türü<select value={refundReturnType} onChange={event=>{setRefundReturnType(event.target.value);const line=refundPreview.sourceLines.find((line:any)=>line.id===refundSourceLineId);if(line?.unitPrice) setRefundQuantity(String(Number((refundPreview.amount/(line.unitPrice*(1-Number(line.discountRate || 0)/100)*(1+line.vatRate/100))).toFixed(6))));}} className="mt-2 w-full rounded-lg border p-2"><option value="price">Fiyat farkı</option><option value="product">Ürün / fazla tonaj</option></select></label>
+                    {refundReturnType === "price" ? <p>Ürün/hizmet: <strong>Fiyat farkı</strong> · Miktar: <strong>1</strong></p> : <label className="block">İade miktarı ({refundPreview.sourceLines.find((line:any)=>line.id===refundSourceLineId)?.unit || "alış birimi"})<input type="number" min="0" step="0.000001" value={refundQuantity} onChange={event=>setRefundQuantity(event.target.value)} className="mt-2 w-full rounded-lg border p-2"/><span className="mt-2 block">Alış birim fiyatı: {formatMoney(refundPreview.sourceLines.find((line:any)=>line.id===refundSourceLineId)?.unitPrice)}. İade miktarının tutarı onaylanan fazla fatura tutarıyla eşleşmelidir.</span></label>}
+                    <p>KDV oranı ve istisna kodu seçili alış ürününden alınır.</p><button type="button" disabled={refundBusy || refundSourceLineId === "" || (refundReturnType === "product" && !(Number(refundQuantity)>0))} onClick={createRefund} className="rounded-lg bg-emerald-700 px-4 py-3 font-bold text-white disabled:opacity-50">{refundBusy ? "İade oluşturuluyor…" : "Fark iadesini onayla ve oluştur"}</button></>}
                   </div>}
                   {siparis.purchase_refund_id && !refundPreview && <button type="button" disabled={refundBusy} onClick={previewRefund} className="mt-2 font-bold underline">Paraşüt iade kaydını göster</button>}
                   {refundError && <p role="alert" className="mt-3 text-red-700">{refundError}</p>}
