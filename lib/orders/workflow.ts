@@ -13,7 +13,8 @@ export function orderStage(order: OrderRow): OrderStage {
   if (progress.complete) return "done";
   if (progress.billedTons > 0) return "partial";
   const sent = ["evet", "sevk edildi", "tamam", "yapildi", "yapıldı"].some((s) => dispatch.includes(s));
-  return sent && String(order.plaka || "").trim() ? "fatura" : "sevk";
+  const partialSent = dispatch === "kısmi sevk" && Number(order.teslimOlanTonaj) > 0;
+  return (sent || partialSent) && String(order.plaka || "").trim() ? "fatura" : "sevk";
 }
 
 export const stageLabels: Record<OrderStage, string> = {

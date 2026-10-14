@@ -799,6 +799,7 @@ function getInvoiceStatus(s: any) {
   const alis = String(s?.gelenFatura || s?.matched_purchase_invoice_no || "").toLowerCase();
 
   const sevkOk =
+    (sevkDurumu === "kısmi sevk" && Number(s?.teslimOlanTonaj) > 0) ||
     sevkDurumu.includes("evet") ||
     sevkDurumu.includes("sevk edildi") ||
     sevkDurumu.includes("tamam") ||
