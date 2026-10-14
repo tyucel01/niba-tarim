@@ -31,7 +31,7 @@ export function manualStockSearchTerms(query: string, sourceName: string) {
 export function stockMatchNote(source: unknown, target: unknown) {
   const a = features(source), b = features(target);
   if (a.formula && a.formula !== b.formula) return "Faturadaki ürün formülüyle eşleşmiyor; kontrol edin.";
-  if (a.formula && a.qualifiers.join(" ") !== b.qualifiers.join(" ")) return "Formül aynı; Zn/SO3 gibi katkı bilgileri stok adında farklı veya eksik. Kontrol ederek seçin.";
+  if (a.formula && a.qualifiers.join(" ") !== b.qualifiers.join(" ")) return `Formül aynı; katkı bilgilerini kontrol edin (fatura: ${a.qualifiers.join(", ") || "belirtilmemiş"}, stok: ${b.qualifiers.join(", ") || "belirtilmemiş"}).`;
   return "";
 }
 export function stockMatchScore(source: unknown, target: unknown) {
@@ -39,7 +39,13 @@ export function stockMatchScore(source: unknown, target: unknown) {
   if (!a.text || !b.text || (a.formula && a.formula !== b.formula)) return 0;
   if (a.text === b.text) return 100;
   const qualifiersEqual = a.qualifiers.join(" ") === b.qualifiers.join(" ");
-  if (!qualifiersEqual) return a.formula && a.formula === b.formula ? 35 : 0;
+  if (!qualifiersEqual) {
+    if (!a.formula || a.formula !== b.formula) return 0;
+    const missing = a.qualifiers.filter(word => !b.qualifiers.includes(word));
+    const extra = b.qualifiers.filter(word => !a.qualifiers.includes(word));
+    // Zinc is a product distinction; missing SO3 on the stock label is a smaller uncertainty.
+    return Math.max(10, 90 - missing.reduce((sum, word) => sum + (word === "zn" || word === "cinko" ? 45 : 10), 0) - extra.length * 20);
+  }
   const overlap = a.words.filter(word => b.words.includes(word)).length;
   if (a.formula && a.formula === b.formula) {
     const missing = a.words.filter(word => !b.words.includes(word)).length;

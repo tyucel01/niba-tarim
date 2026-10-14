@@ -1,3 +1,4 @@
+import { invalidateStockCatalog } from "@/lib/parasut/stock-search";
 import { authorizeWhatsApp, whatsappAdmin } from "@/lib/whatsapp/admin";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -93,6 +94,8 @@ export async function POST(req: NextRequest) {
         { status: res.status }
       );
     }
+
+    await invalidateStockCatalog(companyId).catch(() => { console.error("Yeni stok kartı oluştu; stok arama indeksinin yenilenmesi kontrol bekliyor."); });
 
     return NextResponse.json({
       success: true,

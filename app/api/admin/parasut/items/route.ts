@@ -69,7 +69,8 @@ export async function GET(req: Request) {
     }));
 
     items.sort((a, b) => (b.score || 0) - (a.score || 0));
-    return NextResponse.json({ success: true, items });
+    const relevant = items.filter(item => (item.score || 0) > 0);
+    return NextResponse.json({ success: true, items: (sourceName && relevant.length ? relevant : items).slice(0, 10) });
   } catch (err: any) {
     return NextResponse.json(
       { success: false, error: err?.message || String(err) },

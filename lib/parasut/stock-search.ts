@@ -1,16 +1,30 @@
-// Share a small cache of exact-name queries across automatic and manual stock search.
-// There is no unfiltered inventory request, and repeated invoice openings reuse results.
-const queries = new Map<string, { expires: number; products: any[] }>();
-const pending = new Map<string, Promise<any[]>>();
+import { cachedIncomingPage } from "./incoming-cache";
+import { invoiceAdmin } from "./invoice-pool";
+import { productText } from "./stock-suggestions";
+const catalogKey = (companyId: string) => `stock-catalog:v1:${companyId}`;
 export async function cachedStockSearch(companyId: string, term: string, get: (path: string) => Promise<any>) {
-  const key = `${companyId}:${term.toLocaleLowerCase("tr-TR")}`;
-  const cached = queries.get(key);
-  if (cached && cached.expires > Date.now()) return cached.products;
-  if (pending.has(key)) return pending.get(key)!;
-  const promise = get(`/products?page[size]=25&filter[name]=${encodeURIComponent(term)}`).then(data => {
-    const products = data.data || [];
-    if (queries.size >= 200) queries.delete(queries.keys().next().value!);
-    queries.set(key, { expires: Date.now() + 5 * 60_000, products }); return products;
-  }).finally(() => pending.delete(key));
-  pending.set(key, promise); return promise;
+  // Cache the compact name index in the database for four hours, shared by all servers.
+  // Browser requests receive matching candidates, never the complete stock catalog.
+  const catalog = await cachedIncomingPage(catalogKey(companyId), async () => {
+    const products: any[] = [];
+    let pages = 1;
+    for (let page = 1; page <= pages; page++) {
+      const data = await get(`/products?page[size]=25&page[number]=${page}&sort=id`);
+      pages = Number(data.meta?.total_pages || 1);
+      if (!Number.isInteger(pages) || pages < 0 || pages > 200) throw new Error("Stok adları indeksi tamamlanamadı.");
+      for (const item of data.data || []) products.push({ id: String(item.id), type: "products", attributes: { name: item.attributes?.name || "", code: item.attributes?.code || "", unit: item.attributes?.unit || "", archived: Boolean(item.attributes?.archived), inventory_tracking: Boolean(item.attributes?.inventory_tracking) } });
+    }
+    return { products };
+  });
+  const words = productText(term).split(" ").filter(Boolean);
+  if (!words.length) return [];
+  return catalog.products.filter((item: any) => {
+    if (item.attributes?.archived) return false;
+    const tokens = productText(`${item.attributes?.name || ""} ${item.attributes?.code || ""}`).split(" ");
+    return words.every(word => tokens.some(token => token.includes(word)));
+  });
+}
+export async function invalidateStockCatalog(companyId: string) {
+  const { error } = await invoiceAdmin().from("parasut_response_cache").update({ expires_at: new Date(0).toISOString() }).eq("cache_key", catalogKey(companyId));
+  if (error) throw new Error("Stok adları indeksi yenilenemedi.");
 }
