@@ -5,6 +5,8 @@ export type OrderStage = "sevk" | "fatura" | "partial" | "done" | "cancelled";
 
 // Workflow labels do not change the existing Paraşüt invoice eligibility rules.
 export function orderStage(order: OrderRow): OrderStage {
+  // Manual historical completion affects the display only, not invoice accounting.
+  if (order.manual_invoice_status === "invoiced") return "done";
   const dispatch = String(order.sevkDurumu || "").toLocaleLowerCase("tr-TR");
   if (dispatch.includes("iptal")) return "cancelled";
   const progress = salesProgress(order);
