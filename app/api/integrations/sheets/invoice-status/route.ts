@@ -1,9 +1,11 @@
+import { verifiedLegacyInvoices } from "@/lib/parasut/legacy-invoice-status";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { validSecret } from "@/lib/orders/sheets";
 import { sheetInvoiceStatus } from "@/lib/orders/sheet-invoice-status";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 const reply = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 export async function POST(request: Request) {
   const expected = process.env.SHEETS_SYNC_SECRET || "";
@@ -25,9 +27,12 @@ export async function POST(request: Request) {
     const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
     const { data, error } = await admin.from("siparisler").select("satisId,teslimOlanTonaj,sales_invoice_history").in("satisId", ids);
     if (error) return reply({ success: false, error: "Fatura durumları okunamadı." }, 503);
+    let verifiedLegacyIds: Set<string>;
+    try { verifiedLegacyIds = await verifiedLegacyInvoices(data || []); }
+    catch { return reply({ success: false, error: "Eski faturalar Paraşüt'ten doğrulanamadı. Sonraki aktarımda yeniden denenecek; Sheet'e yazılmadı." }, 503); }
     const statuses = ids.map(satisId => {
       const rows = (data || []).filter(row => row.satisId === satisId);
-      return { satisId, status: rows.length === 1 ? sheetInvoiceStatus(rows[0]) : null, reason: rows.length > 1 ? "duplicate" : rows.length === 0 ? "missing" : "" };
+      return { satisId, status: rows.length === 1 ? sheetInvoiceStatus(rows[0], verifiedLegacyIds) : null, reason: rows.length > 1 ? "duplicate" : rows.length === 0 ? "missing" : "" };
     });
     return reply({ success: true, statuses });
   } catch { return reply({ success: false, error: "İstek okunamadı." }, 400); }
