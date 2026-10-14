@@ -1,3 +1,4 @@
+import { authorizeWhatsApp, whatsappAdmin } from "@/lib/whatsapp/admin";
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +35,8 @@ function toNumber(value: any) {
 
 export async function POST(req: NextRequest) {
   try {
+    const denied = await authorizeWhatsApp(req, whatsappAdmin());
+    if (denied) return denied;
     const companyId = process.env.PARASUT_COMPANY_ID;
     if (!companyId) {
       return NextResponse.json(
@@ -45,7 +48,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
 
     const name = String(body?.name || "").trim();
-    const vatRate = toNumber(body?.vatRate || 20);
+    const vatRate = Number(body?.vatRate ?? 20);
+    if (!Number.isFinite(vatRate) || vatRate < 0 || vatRate > 100) return NextResponse.json({ success: false, error: "KDV oranı geçersiz." }, { status: 422 });
 
     if (!name) {
       return NextResponse.json(
@@ -65,6 +69,7 @@ export async function POST(req: NextRequest) {
           vat_rate: vatRate,
           unit: body?.unit || "ton",
           archived: false,
+          ...(body?.inventoryTracking === true ? { inventory_tracking: true } : {}),
         },
       },
     };

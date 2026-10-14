@@ -1,3 +1,5 @@
+import { convertStockLine, normalizeInvoiceUnit, type StockSelection } from "@/lib/parasut/stock-conversion";
+import { stockConfirmation, checkStockConfirmation } from "@/lib/parasut/stock-confirmation";
 import { authorizeWhatsApp } from "@/lib/whatsapp/admin";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -111,130 +113,34 @@ function getVatRate(detail: any) {
   return toNumber(attr.vat_rate ?? attr.vatRate ?? 20);
 }
 
-async function findProductByName(token: string, companyId: string, name: string) {
-  const res = await fetch(
-    `${BASE_URL}/v4/${companyId}/products?page[size]=25&filter[name]=${encodeURIComponent(
-      name
-    )}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-      cache: "no-store",
+async function mappedStockLines(token: string, companyId: string, preview: any, selections: StockSelection[]): Promise<ReturnType<typeof convertStockLine>[]> {
+  const details = (preview?.included || []).filter((item: any) => item.type === "e_invoice_preview_detail");
+  if (!details.length || !Array.isArray(selections) || selections.length !== details.length) throw new Error("Her fatura kalemi için stok ürünü ve kaynak birimi seçin.");
+  const indexes = selections.map(item => item.lineIndex);
+  if (new Set(indexes).size !== details.length || indexes.some(index => !Number.isInteger(index) || index < 0 || index >= details.length)) throw new Error("Fatura kalem seçimleri geçersiz. Önizlemeyi yenileyin.");
+  const products = new Map<string, any>();
+  // Fetch each stock card from Paraşüt; client-supplied names, units and prices are never used.
+  for (const selection of selections) {
+    const id = clean(selection.productId);
+    if (!id) throw new Error("Her kalemin stok karşılığını seçin.");
+    if (!products.has(id)) {
+      const response = await fetch(`${BASE_URL}/v4/${companyId}/products/${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, cache: "no-store" });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.data) throw new Error("Stok kartı doğrulanamadı. Yeniden seçin.");
+      products.set(id, data.data);
     }
-  );
-
-  const data = await res.json().catch(() => null);
-  if (!res.ok) return null;
-
-  const products = data?.data || [];
-
-  return (
-    products.find(
-      (p: any) =>
-        String(p?.attributes?.name || "").trim().toLowerCase() ===
-        name.trim().toLowerCase()
-    ) ||
-    products[0] ||
-    null
-  );
-}
-
-async function createProduct(
-  token: string,
-  companyId: string,
-  name: string,
-  vatRate = 20
-) {
-  const payload = {
-    data: {
-      type: "products",
-      attributes: {
-        name,
-        code: "",
-        vat_rate: vatRate,
-        unit: "ton",
-        archived: false,
-      },
-    },
-  };
-
-  const res = await fetch(`${BASE_URL}/v4/${companyId}/products`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-    cache: "no-store",
+  }
+  return details.map((detail: any, lineIndex: number) => {
+    const selection = selections.find(item => item.lineIndex === lineIndex)!;
+    return convertStockLine(detail.attributes || {}, selection, products.get(clean(selection.productId)));
   });
-
-  const data = await res.json().catch(() => null);
-
-  if (!res.ok) {
-    throw new Error(`Ürün oluşturulamadı: ${JSON.stringify(data)}`);
-  }
-
-  return data?.data;
-}
-
-async function getOrCreateProduct(
-  token: string,
-  companyId: string,
-  name: string,
-  vatRate = 20
-) {
-  const found = await findProductByName(token, companyId, name);
-  if (found?.id) return found;
-
-  return await createProduct(token, companyId, name, vatRate);
-}
-
-async function enrichDetailsWithProducts(
-  token: string,
-  companyId: string,
-  details: any[]
-) {
-  const enriched: any[] = [];
-
-  for (const detail of details) {
-    const nextDetail = JSON.parse(JSON.stringify(detail));
-
-    delete nextDetail.id;
-
-    nextDetail.type = "purchase_bill_details";
-    nextDetail.attributes = nextDetail.attributes || {};
-
-    const productName = getDetailName(nextDetail);
-    const vatRate = getVatRate(nextDetail);
-
-    const product = await getOrCreateProduct(
-      token,
-      companyId,
-      productName,
-      vatRate
-    );
-
-    nextDetail.relationships = nextDetail.relationships || {};
-    nextDetail.relationships.product = {
-      data: {
-        id: String(product.id),
-        type: "products",
-      },
-    };
-
-    enriched.push(nextDetail);
-  }
-
-  return enriched;
 }
 
 async function buildPurchaseBillPayload(
   convertData: any,
   supplierId: string,
-  eInvoiceId: string
+  eInvoiceId: string,
+  mappedLines: ReturnType<typeof convertStockLine>[]
 ) {
   const converted = convertData?.data;
 
@@ -256,7 +162,7 @@ async function buildPurchaseBillPayload(
   const supplierFromConvert =
     included.find((x: any) => x?.type === "contacts") || null;
 
-  const details = detailItems.map((detail: any) => {
+  const details = detailItems.map((detail: any, lineIndex: number) => {
     const d = detail.attributes || {};
 
     const productName =
@@ -264,45 +170,18 @@ async function buildPurchaseBillPayload(
       clean(d.description) ||
       "E-Fatura Kalemi";
 
- const quantity = toNumber(d.quantity || 1);
-const unitPrice = toNumber(d.unit_price || 0);
+ const mapping = mappedLines[lineIndex];
+if (!mapping) throw new Error("Stok dönüşümü önizlemesi eksik.");
+const quantity = mapping.quantity;
+const unitPrice = mapping.unitPrice;
 if (d.vat_rate == null || d.vat_rate === "" || !Number.isFinite(Number(d.vat_rate))) throw new Error("Fatura kaleminde KDV oranı eksik/geçersiz.");
 const vatRate = toNumber(d.vat_rate);
 const baseTotal = quantity * unitPrice;
 const discountValue = toNumber(d.discount_value ?? 0);
 const netTotal = baseTotal - (d.discount_type === "percentage" ? baseTotal * discountValue / 100 : discountValue);
 
-let unit = "Adet";
-
-const rawUnit = String(
-  d.unit ||
-    d.unit_name ||
-    d.measurement_unit ||
-    d.unit_code ||
-    d.base_unit ||
-    d.product_unit ||
-    ""
-).toLowerCase();
-
-if (
-  rawUnit.includes("kg") ||
-  rawUnit.includes("kilogram") ||
-  rawUnit === "kgr"
-) {
-  unit = "kg";
-} else if (
-  rawUnit.includes("ton") ||
-  rawUnit.includes("tn")
-) {
-  unit = "ton";
-} else if (
-  rawUnit.includes("adet") ||
-  rawUnit === "ad"
-) {
-  unit = "Adet";
-} else if (quantity >= 1000) {
-  unit = "kg";
-}
+// Persist the selected stock card and the exact conversion confirmed in preview.
+const unit = mapping.targetUnit;
 
     return {
       type: "purchase_bill_details",
@@ -338,28 +217,7 @@ attributes: {
         product: {
           data: {
             type: "products",
-            attributes: {
-              name: productName,
-              code: null,
-              barcode: null,
-              unit,
-              buying_price: unitPrice,
-              buying_price_in_trl: 0,
-              list_price: 0,
-              list_price_in_trl: 0,
-              buying_currency: attr.currency || "TRL",
-              currency: attr.currency || "TRL",
-              inventory_tracking: false,
-              archived: false,
-              vat_rate: vatRate.toFixed(2),
-              sales_excise_duty_type: "percentage",
-              sales_excise_duty: "0.0",
-              purchase_excise_duty_type: "amount",
-              purchase_excise_duty: "0.0",
-              communications_tax_rate: "0.0",
-              accommodation_tax_rate: "0.0",
-              item_type: "SimpleProduct",
-            },
+            id: mapping.productId,
           },
         },
         invoice: {
@@ -473,7 +331,7 @@ async function verifyPurchaseBill(
   purchaseBillId: string
 ) {
   const res = await fetch(
-    `${BASE_URL}/v4/${companyId}/purchase_bills/${purchaseBillId}`,
+    `${BASE_URL}/v4/${companyId}/purchase_bills/${purchaseBillId}?include=details,details.product`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -571,6 +429,7 @@ if (existingOrder?.matched_purchase_invoice_id) {
 
     const { data: storedInvoice, error: storedError } = await supabase.from("purchase_invoice_pool").select("*").eq("e_invoice_id", eInvoiceId).maybeSingle();
     if (storedError) throw new Error("Fatura takip kaydı okunamadı.");
+    if (storedInvoice && body?.preview === true) return NextResponse.json({ success: false, error: "Bu fatura için kayıt zaten başlatılmış veya tamamlanmış. Listeyi yenileyin; tekrar dönüşüm yapılmadı." }, { status: 409 });
     if (storedInvoice) {
       if (String(storedInvoice.supplier_id) !== supplierId) return NextResponse.json({ success: false, error: "Fatura kayıtlı tedarikçi cari kartıyla eşleşmiyor." }, { status: 422 });
       if (storedInvoice.state !== "ready" && !storedInvoice.purchase_bill_id) return NextResponse.json({ success: false, error: "Bu fatura için giderleştirme başlatılmış. Tekrar gider kaydı oluşturulmadı; Paraşüt kaydını kontrol edin." }, { status: 409 });
@@ -605,7 +464,14 @@ if (existingOrder?.matched_purchase_invoice_id) {
     const difference = Math.round((previewTotal - expected) * 100) / 100;
     if (Math.round(previewTotal * 100) !== Math.round(confirmedAvailable * 100) || Math.round(expected * 100) !== Math.round(confirmedExpected * 100)) return NextResponse.json({success:false,error:"Fatura veya sipariş tutarı değişti. Listeyi yenileyip yeniden onaylayın."},{status:409});
     if ((difference < 0 && differenceMode !== "accept") || (differenceMode === "refund" && difference <= 0)) return NextResponse.json({success:false,error:"Fatura farkı için uygun işlemi seçip onaylayın."},{status:422});
-    const { error: reserveError } = await supabase.from("purchase_invoice_pool").insert({ e_invoice_id: eInvoiceId, supplier_id: supplierId, supplier_name: supplierIdentity.data?.attributes?.name, supplier_tax_no: supplierTax, total: previewTotal, currency: previewData.data.attributes.currency });
+    const selections = body?.stockSelections;
+    const mappedLines = await mappedStockLines(token, companyId, previewData, selections);
+    const purchaseBillPayload = await buildPurchaseBillPayload(previewData, supplierId, eInvoiceId, mappedLines);
+    const confirmationValue = { siparisId, eInvoiceId, supplierId, differenceMode, confirmedAvailable, confirmedExpected, mappedLines, purchaseBillPayload };
+    const secret = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+    if (body?.preview === true) return NextResponse.json({ success: true, stockPreview: { lines: mappedLines, currency: previewData.data.attributes.currency, total: previewTotal }, stockConfirmation: stockConfirmation(confirmationValue, secret) });
+    if (body?.confirmStock !== true || !checkStockConfirmation(body?.stockConfirmation, confirmationValue, secret)) return NextResponse.json({ success: false, error: "Stok ürünü, birim veya fatura bilgisi değişmiş olabilir. Dönüştürülecek hali yeniden görüntüleyip teyit edin." }, { status: 409 });
+    const { error: reserveError } = await supabase.from("purchase_invoice_pool").insert({ e_invoice_id: eInvoiceId, supplier_id: supplierId, supplier_name: supplierIdentity.data?.attributes?.name, supplier_tax_no: supplierTax, total: previewTotal, currency: previewData.data.attributes.currency, stock_line_mappings: mappedLines });
     if (reserveError) return NextResponse.json({ success: false, error: "Bu fatura için işlem zaten başlatılmış olabilir. Listeyi yenileyin; tekrar gider kaydı oluşturulmadı." }, { status: 409 });
 
     // 1) E-FATURAYI KABUL ET
@@ -632,44 +498,7 @@ if (existingOrder?.matched_purchase_invoice_id) {
 
     const acceptData = await acceptRes.json().catch(() => null);
 
-    // 2) E-FATURAYI GİDER KAYDI FORMATINA ÇEVİR
-    const convertRes = await fetch(
-      `${BASE_URL}/v4/${companyId}/e_invoices/${eInvoiceId}/convert`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/json",
-        },
-        cache: "no-store",
-      }
-    );
-
-    const convertData = await convertRes.json().catch(() => null);
-    console.log("PARASUT_CONVERT_DATA_FULL", JSON.stringify(convertData, null, 2));
-
-    if (!convertRes.ok) {
-      return NextResponse.json(
-        {
-          success: false,
-          step: "convert_invoice",
-          message:
-            "Fatura kabul edilmiş olabilir ama Paraşüt convert adımı başarısız oldu. Bu nedenle gider kaydı oluşmadı.",
-          acceptStatus: acceptRes.status,
-          acceptOk: acceptRes.ok,
-          acceptData,
-          error: convertData,
-        },
-        { status: convertRes.status }
-      );
-    }
-
-    // 3) PURCHASE_BILLS PAYLOAD HAZIRLA
-const purchaseBillPayload = await buildPurchaseBillPayload(
-  convertData,
-  supplierId,
-  eInvoiceId
-);
+    const convertData = previewData;
 
     // 4) GERÇEK GİDER / ALIŞ FATURASI KAYDI OLUŞTUR
     const createRes = await fetch(`${BASE_URL}/v4/${companyId}/purchase_bills`, {
@@ -744,6 +573,18 @@ const purchaseBillPayload = await buildPurchaseBillPayload(
         { status: 500 }
       );
     }
+
+    const savedLines = (verify.data?.included || []).filter((item: any) => item.type === "purchase_bill_details");
+    const unmatched = [...savedLines];
+    const allMatch = mappedLines.every(line => {
+      const index = unmatched.findIndex((saved: any) => String(saved.relationships?.product?.data?.id) === line.productId && Math.abs(Number(saved.attributes?.quantity) - line.quantity) < .000001 && Math.abs(Number(saved.attributes?.unit_price) - line.unitPrice) < .000001 && Number(saved.attributes?.vat_rate) === line.vatRate && Math.abs(Number(saved.attributes?.discount_value || 0) - line.discountValue) < .000001 && (saved.attributes?.discount_type || "amount") === line.discountType);
+      if (index < 0) return false;
+      const saved = unmatched[index];
+      const savedProduct = (verify.data?.included || []).find((item: any) => item.type === "products" && String(item.id) === line.productId);
+      if (normalizeInvoiceUnit(saved.attributes?.unit || savedProduct?.attributes?.unit) !== line.targetUnit) return false;
+      unmatched.splice(index, 1); return true;
+    });
+    if (!allMatch || unmatched.length || Math.abs(extractInvoiceTotal(verify.data) - previewTotal) > .01) return NextResponse.json({ success: false, error: "Alış faturası oluştu fakat stok dönüşümü veya tutarı teyit edilen haliyle eşleşmiyor. Paraşüt'ten kontrol edin; yeniden giderleştirmeyin.", purchaseBillId }, { status: 409 });
 
     const purchaseBillNo =
       extractInvoiceNo(verify.data) ||

@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import SevkForm from "../sevk-form";
+import StockMapping from "@/app/admin/parasut/components/stock-mapping";
 import { orderStage, stageLabels } from "@/lib/orders/workflow";
 
 export default function SiparisDetayPage() {
@@ -34,6 +35,7 @@ export default function SiparisDetayPage() {
   const [detailLoading, setDetailLoading] = useState("");
   const [detailError, setDetailError] = useState<Record<string, string>>({});
   const [matchingInvoice, setMatchingInvoice] = useState(false);
+  const [stockProofs, setStockProofs] = useState<Record<string, any>>({});
   const [differenceModes, setDifferenceModes] = useState<Record<string, string>>({});
   const [refundPreview, setRefundPreview] = useState<any>(null);
   const [refundReturnType,setRefundReturnType] = useState("price");
@@ -228,6 +230,21 @@ export default function SiparisDetayPage() {
     finally { setDetailLoading(""); }
   }
 
+  function invoiceMatchBody(invoice: any) {
+    const detail = invoiceDetails[String(invoice.id)];
+    const available = numberValue(invoice.remaining_amount ?? detail?.net_total);
+    const difference = Math.round((available - calc.toplamAlisTutari) * 100) / 100;
+    return { siparisId: siparis.id, eInvoiceId: invoice.id, supplierId: selectedSupplierId,
+      differenceMode: difference < 0 ? "accept" : differenceModes[String(invoice.id)] || "keep",
+      confirmedAvailable: available, confirmedExpected: Math.round(calc.toplamAlisTutari * 100) / 100 };
+  }
+  async function previewStock(invoice: any, stockSelections: any[]) {
+    const response = await fetch("/api/admin/parasut/e-invoice/import-and-match", { method: "POST", headers: await invoiceHeaders(), body: JSON.stringify({ ...invoiceMatchBody(invoice), preview: true, stockSelections }) });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(typeof data.error === "string" ? data.error : "Dönüşüm önizlemesi alınamadı.");
+    return data;
+  }
+
   async function matchInvoice(invoice: any) {
     if (!siparis?.id) return;
     if (matchingInvoice) return;
@@ -247,6 +264,8 @@ export default function SiparisDetayPage() {
     }
     const detail = invoiceDetails[String(invoice.id)];
     if (!detail) { await panelAlert("Önce fatura detayını açıp kontrol edin."); return; }
+    const stockProof = stockProofs[String(invoice.id)];
+    if (!invoice.reusable && !stockProof?.stockConfirmation) { await panelAlert("Önce stok ürünlerini seçip dönüştürülecek hali görüntüleyin."); return; }
     const available = invoice.remaining_amount ?? detail.net_total;
     if (!["TRL","TRY"].includes(detail.currency) || !(numberValue(available)>0)) { await panelAlert("Pozitif TL fatura tutarı doğrulanamadı."); return; }
     const difference = Math.round((numberValue(available)-calc.toplamAlisTutari)*100)/100;
@@ -254,7 +273,8 @@ export default function SiparisDetayPage() {
     const outcome = differenceMode === "refund" ? "Fazla tutar bu satışta iade için ayrılacak. Eşleştirme sonrası fark iadesini oluşturabilirsiniz." : differenceMode === "accept" ? "Fark kabul edilerek faturanın kalan tutarının tamamı bu satışa bağlanacak." : "Sipariş tutarı ayrılacak; kalan tutar başka siparişlerde kullanılabilecek.";
     const confirmText = `${getContactName(selectedContact)}\nFatura: ${getInvoiceNo(invoice)}\nFatura tutarı: ${formatInvoiceMoney(detail.net_total, detail.currency)}\nKullanılabilir tutar: ${formatMoney(available)}\nSiparişten beklenen: ${formatMoney(calc.toplamAlisTutari)}\nFark: ${formatMoney(Math.abs(difference))} ${difference < 0 ? "eksik" : difference > 0 ? "fazla" : "(eşit)"}\n${outcome}\nBu şekilde ilerlemek istediğinizden emin misiniz?`;
 
-    if (!(await panelConfirm(confirmText))) return;
+    const conversionText = invoice.reusable ? "" : `\n\nDönüştürülecek hali:\n${stockProof.stockPreview.lines.map((line: any) => `${line.sourceName} → ${line.productName}\n${formatNumber(line.sourceQuantity)} ${line.sourceUnit} × ${formatInvoiceMoney(line.sourceUnitPrice, detail.currency)} → ${formatNumber(line.quantity)} ${line.targetUnit} × ${formatInvoiceMoney(line.unitPrice, detail.currency)}\nKDV: %${line.vatRate} · İskonto: ${line.discountType === "percentage" ? "%" + line.discountValue : formatMoney(line.discountValue)} · Ara toplam: ${formatMoney(line.netTotal)}`).join("\n\n")}\nGenel toplam: ${formatMoney(stockProof.stockPreview.total)}\nBu stok karşılıkları ve dönüştürülmüş miktar/fiyatlarla alış faturasını kaydetmeyi teyit ediyor musunuz?`;
+    if (!(await panelConfirm(confirmText + conversionText))) return;
 
     try {
       setMatchingInvoice(true);
@@ -269,6 +289,7 @@ export default function SiparisDetayPage() {
           differenceMode,
           confirmedAvailable: numberValue(available),
           confirmedExpected: Math.round(calc.toplamAlisTutari*100)/100,
+          ...(invoice.reusable ? {} : { stockSelections: stockProof.stockSelections, stockConfirmation: stockProof.stockConfirmation, confirmStock: true }),
         }),
       });
 
@@ -678,6 +699,7 @@ export default function SiparisDetayPage() {
                             <p className="text-sm">Ara toplam: {formatInvoiceMoney(detail.gross_total, currency)} · KDV: {formatInvoiceMoney(detail.total_vat, currency)} · Genel toplam: {formatInvoiceMoney(detail.net_total, currency)}</p>
                             {detail.net_total != null && (currency === "TRL" || currency === "TRY") && <p className="rounded-xl bg-amber-50 p-3 text-sm font-bold">Sipariş tutarıyla fark: {formatMoney(numberValue(detail.net_total) - calc.toplamAlisTutari)}. Miktar, birim fiyat ve KDV kapsamını kontrol edin.</p>}
                             {detail.plates?.length > 0 && <p className="rounded-xl bg-white p-3 text-sm font-bold text-slate-800">Fatura plakası: {detail.plates.join(" · ")}</p>}<div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">Ürün / açıklama</th><th className="p-2">Miktar</th><th className="p-2">Birim fiyat</th><th className="p-2">KDV</th><th className="p-2">Kalem tutarı</th></tr></thead><tbody>{detail.details.map((line: any, index: number) => <tr key={index} className="border-t border-slate-200"><td className="p-2"><p>{line.product_mapping_name || line.product_name || "Ürün kalemi"}</p>{line.plates?.length > 0 && <p className="mt-1 text-xs font-semibold text-slate-600">Plaka: {line.plates.join(" · ")}</p>}</td><td className="p-2">{formatNumber(line.quantity)} {line.unit || line.unit_name || line.unit_code || ""}</td><td className="p-2">{formatInvoiceMoney(line.unit_price, currency)}</td><td className="p-2">%{formatNumber(line.vat_rate)}</td><td className="p-2">{formatInvoiceMoney(line.net_total, currency)}</td></tr>)}</tbody></table></div>
+                            {!invoice.reusable && detail.details.length > 0 && <StockMapping key={`${invoice.id}:${selectedSupplierId}`} invoiceId={String(invoice.id)} supplierId={selectedSupplierId} lines={detail.details} contextKey={JSON.stringify(invoiceMatchBody(invoice))} disabled={matchingInvoice} headers={invoiceHeaders} confirmNew={panelConfirm} requestPreview={selections => previewStock(invoice, selections)} onChange={value => setStockProofs(previous => ({ ...previous, [String(invoice.id)]: value }))} />}
                             {!detail.details.length && <p className="text-sm text-amber-800">Fatura kalemleri alınamadı; giderleştirme kapalı.</p>}
                           </div>}
                           </div>}
@@ -692,7 +714,7 @@ export default function SiparisDetayPage() {
                         </div>}
                         <button
                           type="button"
-                          disabled={matchingInvoice || calc.teslimOlanTonaj <= 0 || calc.toplamAlisTutari <= 0 || !selectedSupplierId || !taxMatches || !detail?.details?.length || detail?.net_total == null || !["TRL", "TRY"].includes(currency) || available <= 0}
+                          disabled={matchingInvoice || calc.teslimOlanTonaj <= 0 || calc.toplamAlisTutari <= 0 || !selectedSupplierId || !taxMatches || !detail?.details?.length || detail?.net_total == null || !["TRL", "TRY"].includes(currency) || available <= 0 || (!invoice.reusable && !stockProofs[String(invoice.id)]?.stockConfirmation)}
                           onClick={() => matchInvoice(invoice)}
                           className={`mt-4 w-full rounded-xl px-4 py-3 text-xs font-black transition ${
                             selectedSupplierId
@@ -703,7 +725,7 @@ export default function SiparisDetayPage() {
                           {selectedSupplierId
                             ? matchingInvoice
                               ? "Giderleştiriliyor..."
-                              : invoice.reusable ? "Kalan tutardan bu siparişe pay ayır ve eşleştir" : "Faturayı giderleştir ve bu siparişe pay ayır"
+                              : invoice.reusable ? "Kalan tutardan bu siparişe pay ayır ve eşleştir" : "Dönüştürülecek hali teyit et ve alış faturasını kaydet"
                             : "Önce cari kart seç"}
                         </button>
                       </div>

@@ -12,6 +12,33 @@ test('dry run flag reaches transactional RPC; invalid row does not abort other v
 test('database failure returns retryable error without leaking database error or secret',async()=>{const r=route({dbError:true});const response=await r.post(req());assert.equal(response.status,503);const text=await response.text();assert.equal(text.includes('private detail'),false);assert.equal(text.includes(secret),false);});
 test('stream limit enforced without Content-Length',async()=>{const r=route();assert.equal((await r.post(req({extra:'x'.repeat(256001)}))).status,413);assert.equal(r.calls.length,0);});
 const script={console,Date,Set,Utilities:{formatDate:()=> '2026-10-01'}};vm.createContext(script);vm.runInContext(fs.readFileSync(path.join(root,'integrations/google-sheets/Code.gs'),'utf8'),script);
-const sheet=matrix=>({getDataRange:()=>({getValues:()=>matrix}),getParent:()=>({getSpreadsheetTimeZone:()=> 'Europe/Istanbul'})});
+const sheet=matrix=>[[],...matrix.map((cells,index)=>[...cells,index===0?'Satış Tarihi':'2026-10-01'])];
 test('Apps Script maps existing Excel headings, ignores invoice/payment columns, normalizes statuses',()=>{const rows=script.nReadRows(sheet([['Satış ID','Bayi','Ürün','Sipariş','Peşin Satış Fiyatı','Plaka','Sevk Durumu','GTS','Fatura No','Yapılan Ödeme'],['A','Demo','8.20.0',27,19000,'33 DEM 123','Evet','Çıkış yapıldı','DO-NOT-SEND',300]]));assert.equal(rows[0].values.sevkDurumu,'Sevk Edildi');assert.equal(rows[0].values.gts,'Girildi');assert.equal(rows[0].values.faturaNo,undefined);assert.equal(rows[0].values.yapilanOdeme,undefined);});
 test('Apps Script refuses duplicate IDs across complete sheet and duplicate mapped headings',()=>{const h=['Satış ID','Bayi','Ürün','Sipariş','Peşin Satış Fiyatı'];const r=['A','Demo','DAP',27,19000];assert.throws(()=>script.nReadRows(sheet([h,r,r])));assert.throws(()=>script.nReadRows(sheet([[...h,'Miktar'],[...r,27]])));});
+
+test('read-only Sheets API preserves numeric/date values and skips sparse trailing cells',()=>{
+  const calls=[];
+  script.Sheets={Spreadsheets:{Values:{get:(id,range,opts)=>{calls.push({id,range,opts});return {values:[[],['Satış ID','Bayi','Ürün','Sipariş','Peşin Satış Fiyatı','Satış Tarihi','Not'],['A','Demo','DAP',27.5,19000,46296]]}}}}};
+  const rows=script.nLoadRows('test-file',"Satış'lar");
+  assert.equal(calls[0].range,"'Satış''lar'");assert.equal(calls[0].opts.valueRenderOption,'UNFORMATTED_VALUE');
+  assert.equal(rows[0].values.siparisTonaj,27.5);assert.equal(rows[0].values.satisTarihi,'2026-10-01');assert.equal(rows[0].values.not,undefined);
+  const manifest=JSON.parse(fs.readFileSync(path.join(root,'integrations/google-sheets/appsscript.json'),'utf8'));
+  assert.ok(manifest.oauthScopes.includes('https://www.googleapis.com/auth/spreadsheets'));
+  assert.ok(!manifest.oauthScopes.includes('https://www.googleapis.com/auth/spreadsheets.readonly'));
+});
+
+test('second-row headings retain actual sheet row numbers and duplicate locations',()=>{
+  const headers=['Satış ID','Bayi','Ürün','Sipariş','Peşin Satış Fiyatı','Satış Tarihi'];
+  const values=['A','Demo','DAP',27,19000,'2026-10-01'];
+  const rows=script.nReadRows([['title'],headers,values]);assert.equal(rows[0].rowNumber,3);
+  assert.throws(()=>script.nReadRows([['title'],headers,values,values]),/Satır 3 ve 4/);
+});
+test('number diagnostic matches server validation and masks values without transmitting',()=>{
+  for(const value of [27,0,-1,1e13,true,'19.500,25','27.5','-','Dahil','27 ton','%2','',null,undefined]) {
+    let bad=false;try{lib.validateValues({satisId:'A',nakliye:value})}catch{bad=true}
+    assert.equal(Boolean(script.nNumberProblem(value)),bad,String(value));
+  }
+  const report=script.nNumberReport([{rowNumber:3,values:{nakliye:'GizliBilgi',vadeFarki:'%9',alisFiyati:12345.67}}]);
+  assert.equal(report.sorunluSutunlar.Nakliye,1);assert.equal(report.ornekler[0].satir,3);
+  assert.ok(!JSON.stringify(report).includes('GizliBilgi'));assert.ok(!JSON.stringify(report).includes('12345'));
+});

@@ -63,11 +63,13 @@ export async function GET(req: Request) {
       );
     }
 
-    const items = (data.data || []).map((item: any) => ({
+    const items = (data.data || []).filter((item: any) => !item.attributes?.archived).map((item: any) => ({
       id: item.id,
       type: item.type,
       name: item.attributes?.name || "",
       code: item.attributes?.code || "",
+      unit: item.attributes?.unit || "",
+      inventoryTracking: Boolean(item.attributes?.inventory_tracking),
       raw: item,
     }));
 
