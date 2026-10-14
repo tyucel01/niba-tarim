@@ -7,7 +7,6 @@ export type OrderStage = "sevk" | "fatura" | "partial" | "done" | "cancelled";
 export function orderStage(order: OrderRow): OrderStage {
   // Manual historical completion affects the display only, not invoice accounting.
   if (order.manual_invoice_status === "invoiced") return "done";
-  if (order.manual_invoice_status === "partial") return "partial";
   const dispatch = String(order.sevkDurumu || "").toLocaleLowerCase("tr-TR");
   if (dispatch.includes("iptal")) return "cancelled";
   const progress = salesProgress(order);
