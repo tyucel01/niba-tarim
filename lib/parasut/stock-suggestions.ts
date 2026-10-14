@@ -13,9 +13,26 @@ function features(value: unknown) {
 export function stockSearchTerms(name: unknown) {
   const value = String(name ?? "").trim();
   const f = features(value);
-  // Two short, filtered searches at most; never request an unfiltered stock list.
-  const terms = [value, f.formula || f.words.slice(0, 2).join(" ")].filter(term => term.length >= 2);
-  return [...new Set(terms)].slice(0, 2);
+  // Paraşüt's name filter is exact: query a bounded set of real name spellings.
+  const grade = f.formula;
+  const zinc = f.qualifiers.includes("zn") ? "ZN" : "";
+  const terms = [value, grade.replace(/\./g, "-"), grade,
+    zinc && `${grade} +${zinc}`, zinc && `${grade}+${zinc}`,
+    zinc && `${grade.replace(/\./g, "-")} +${zinc}`]
+    .filter((term): term is string => Boolean(term) && String(term).length >= 2);
+  return [...new Set(terms)].slice(0, 6);
+}
+export function manualStockSearchTerms(query: string, sourceName: string) {
+  const queryWords = productText(query).split(" ").filter(Boolean);
+  const sourceWords = new Set(productText(sourceName).split(" "));
+  const useSource = queryWords.length > 0 && queryWords.every(word => sourceWords.has(word));
+  return [...new Set([...stockSearchTerms(query), ...(useSource ? stockSearchTerms(sourceName) : [])])].slice(0, 6);
+}
+export function stockMatchNote(source: unknown, target: unknown) {
+  const a = features(source), b = features(target);
+  if (a.formula && a.formula !== b.formula) return "Faturadaki ürün formülüyle eşleşmiyor; kontrol edin.";
+  if (a.formula && a.qualifiers.join(" ") !== b.qualifiers.join(" ")) return "Formül aynı; Zn/SO3 gibi katkı bilgileri stok adında farklı veya eksik. Kontrol ederek seçin.";
+  return "";
 }
 export function stockMatchScore(source: unknown, target: unknown) {
   const a = features(source), b = features(target);
@@ -34,7 +51,7 @@ export function stockMatchScore(source: unknown, target: unknown) {
 }
 export function rankStockCandidates(sourceName: string, products: any[]) {
   const unique = [...new Map(products.filter(product => product?.id && !product.attributes?.archived).map(product => [String(product.id), product])).values()];
-  const candidates = unique.map(product => ({ id: String(product.id), name: String(product.attributes?.name || ""), code: product.attributes?.code || "", unit: product.attributes?.unit || "", inventoryTracking: Boolean(product.attributes?.inventory_tracking), score: stockMatchScore(sourceName, product.attributes?.name) })).filter(item => item.score > 0).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "tr")).slice(0, 5);
+  const candidates = unique.map(product => ({ id: String(product.id), name: String(product.attributes?.name || ""), code: product.attributes?.code || "", unit: product.attributes?.unit || "", inventoryTracking: Boolean(product.attributes?.inventory_tracking), matchNote: stockMatchNote(sourceName, product.attributes?.name), score: stockMatchScore(sourceName, product.attributes?.name) })).filter(item => item.score > 0).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "tr")).slice(0, 5);
   const first = candidates[0], second = candidates[1];
   const suggestedId = first && first.score >= 85 && (!second || first.score - second.score >= 12) && first.unit ? first.id : "";
   return { candidates, suggestedId };

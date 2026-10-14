@@ -1,12 +1,10 @@
+import { cachedStockSearch } from "@/lib/parasut/stock-search";
 import { NextResponse } from "next/server";
 import { authorizeWhatsApp, whatsappAdmin } from "@/lib/whatsapp/admin";
 import { stockSourceKey } from "@/lib/parasut/stock-conversion";
 import { rankStockCandidates, stockSearchTerms } from "@/lib/parasut/stock-suggestions";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-type CachedProducts = { expires: number; products: any[] };
-const queries = new Map<string, CachedProducts>();
-const pending = new Map<string, Promise<any[]>>();
 const base = "https://api.parasut.com";
 export async function POST(request: Request) {
   const admin = whatsappAdmin();
@@ -36,18 +34,7 @@ export async function POST(request: Request) {
       if (!response.ok) throw new Error(response.status === 429 ? "Stok servisi yoğun. Biraz sonra yeniden deneyin." : "Stok önerileri alınamadı.");
       return response.json();
     };
-    const search = async (term: string) => {
-      const key = `${companyId}:${term.toLocaleLowerCase("tr-TR")}`;
-      const cached = queries.get(key);
-      if (cached && cached.expires > Date.now()) return cached.products;
-      if (pending.has(key)) return pending.get(key)!;
-      const promise = get(`/products?page[size]=25&filter[name]=${encodeURIComponent(term)}`).then(data => {
-        const products = data.data || [];
-        if (queries.size >= 200) queries.delete(queries.keys().next().value!);
-        queries.set(key, { expires: Date.now() + 5 * 60_000, products }); return products;
-      }).finally(() => pending.delete(key));
-      pending.set(key, promise); return promise;
-    };
+    const search = (term: string) => cachedStockSearch(companyId, term, get);
     const resolved = new Map<string, any>();
     const suggestions = [];
     for (const name of body.names as string[]) {
@@ -68,7 +55,7 @@ export async function POST(request: Request) {
         for (const term of stockSearchTerms(name)) {
           products.push(...await search(term));
           const ranked = rankStockCandidates(name, products);
-          if (ranked.suggestedId) break;
+          if (ranked.candidates.length) break;
         }
         result = { sourceKey: key, ...rankStockCandidates(name, products), reason: "content" };
       }
