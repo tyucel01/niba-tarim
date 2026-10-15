@@ -74,3 +74,12 @@ test('two 26.5-ton purchase lines create one 53-ton invoice and proportional par
  assert.throws(()=>ctx.buildSalesInvoicePayload({...args,sourceLineIds:['a','a']}),/birden fazla/);
  assert.throws(()=>ctx.buildSalesInvoicePayload({...args,sourceLineIds:['a','missing']}),/bulunamadı/);
 });
+
+test('printed invoice note places the order plate after the dispatch note without changing product names',()=>{
+ const bill={data:{attributes:{currency:'TRL',net_total:10000}},included:[{id:'a',type:'purchase_bill_details',attributes:{description:'20-20-0 Zn',quantity:2000,unit:'kg',net_total:10000,vat_rate:0}}]};
+ const args={order:{teslimOlanTonaj:2,alisFiyati:5000,pesinSatisFiyati:6000,plaka:' 33 ABC 123 '},customerId:'customer',sourceLineId:'a',purchaseBill:bill,invoiceTons:2};
+ const result=ctx.buildSalesInvoicePayload(args);
+ assert.equal(result.payload.data.attributes.invoice_note,'İrsaliye yerine geçer. Plaka: 33 ABC 123');
+ assert.equal(result.payload.data.relationships.details.data[0].attributes.description,'20-20-0 Zn');
+ assert.equal(ctx.buildSalesInvoicePayload({...args,order:{...args.order,plaka:''}}).payload.data.attributes.invoice_note,'İrsaliye yerine geçer.');
+});
