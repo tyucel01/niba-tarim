@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 export default function FaturaKesPage() {
   const { panelAlert, panelConfirm } = usePanelDialog();
   const [sourceLines, setSourceLines] = useState<any[]>([]);
-  const [sourceLineId, setSourceLineId] = useState("");
+  const [sourceLineIds, setSourceLineIds] = useState<string[]>([]);
   const [lineError, setLineError] = useState("");
   const [lineLocked, setLineLocked] = useState(false);
   const [linesLoading, setLinesLoading] = useState(false);
@@ -120,8 +120,8 @@ export default function FaturaKesPage() {
       const res = await fetch("/api/admin/parasut/sales-invoice/create-from-order", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({siparisId:order.id,sourceOnly:true})});
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || "Alış faturası kalemleri alınamadı.");
-      setSourceLines(data.sourceLines || []); setSourceLineId(data.selectedLineId || ""); setLineLocked(Boolean(data.selectionLocked)); setLineError(data.warning || "");
-    } catch (err: any) { setSourceLines([]); setSourceLineId(""); setLineError(err.message); }
+      setSourceLines(data.sourceLines || []); setSourceLineIds(data.selectedLineIds || []); setLineLocked(Boolean(data.selectionLocked)); setLineError(data.warning || "");
+    } catch (err: any) { setSourceLines([]); setSourceLineIds([]); setLineError(err.message); }
     finally { setLinesLoading(false); }
   }
   useEffect(() => { if (order?.matched_purchase_invoice_id && !salesProgress(order).complete) loadSourceLines(); }, [order]);
@@ -147,7 +147,7 @@ export default function FaturaKesPage() {
           body: JSON.stringify({
             siparisId: order.id,
             customerId: selectedCustomerId,
-            sourceLineId,
+            sourceLineIds,
             invoiceTons: Number(invoiceTons.replace(",", ".")),
             confirm: false,
           }),
@@ -174,7 +174,7 @@ export default function FaturaKesPage() {
     }
   }
 
-  useEffect(() => { setPreview(null); }, [selectedCustomerId, invoiceTons, sourceLineId]);
+  useEffect(() => { setPreview(null); }, [selectedCustomerId, invoiceTons, sourceLineIds]);
 
   async function createSalesInvoice() {
     if (!preview || creating) return;
@@ -204,7 +204,7 @@ export default function FaturaKesPage() {
           body: JSON.stringify({
             siparisId: order.id,
             customerId: selectedCustomerId,
-            sourceLineId,
+            sourceLineIds,
             invoiceTons: Number(invoiceTons.replace(",", ".")),
             confirm: true,
             previewFingerprint: preview.fingerprint,
@@ -449,7 +449,29 @@ const selectedCustomer = contacts.find(
         {progress && <section className="rounded-[28px] bg-white p-5 shadow-sm ring-1 ring-slate-100">
           <h2 className="text-xl font-black">{progress.blocked ? "Fatura kontrolü bekliyor" : progress.complete ? "Faturalandı" : progress.billedTons > 0 ? "Kısmi faturalandı" : "Satış faturası kesilecek miktar"}</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">{[["Teslim edilen",progress.tons,progress.total],["Faturalanan",progress.billedTons,progress.billedTotal],["Kalan",progress.remainingTons,progress.remainingTotal]].map(([label,tons,amount])=><div key={String(label)} className="rounded-xl bg-slate-50 p-4"><p className="text-sm font-bold text-slate-500">{label}</p><p className="mt-1 font-black">{formatNumber(Number(tons))} ton · {formatMoney(amount)}</p></div>)}</div>
-          {!progress.complete && <div className="mt-5 rounded-2xl border border-slate-200 p-5"><h3 className="font-bold text-lg">Alış faturasından kalemi seç</h3><p className="mt-1 text-sm text-slate-500">Bu müşteriye ait ürünü seçin. Satış faturasında yalnız bu kalem yer alır; miktar teslim tonajına göre hesaplanır.</p>{linesLoading && <p className="mt-3">Kalemler yükleniyor…</p>}{lineError && <p role="alert" className="mt-3 text-sm font-bold text-red-700">{lineError}</p>}<div className="mt-4 grid gap-3">{sourceLines.map(line => <div key={line.id} className={`rounded-xl border p-4 ${sourceLineId===line.id ? "border-emerald-500 bg-emerald-50" : "border-slate-200"}`}><p className="font-bold">{line.name}</p><p className="mt-1 text-sm text-slate-600">Alış miktarı: {formatNumber(line.tons)} ton · KDV: %{line.vatRate} · Tutar: {formatMoney(line.amount)}</p><p className="mt-1 text-sm">Kalan: {formatNumber(line.remainingTons)} ton</p><button type="button" disabled={Boolean(lineError) || (lineLocked && sourceLineId!==line.id) || selectedTons>line.remainingTons+.000001} onClick={()=>setSourceLineId(line.id)} className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">{sourceLineId===line.id ? "Seçili kalem" : "Kalemi seç"}</button>{selectedTons>line.remainingTons+.000001 && <p className="mt-2 text-sm text-amber-800">Bu kalemin kalan miktarı bu faturada kesilecek tonajı karşılamıyor.</p>}</div>)}</div><button type="button" onClick={loadSourceLines} disabled={linesLoading} className="mt-3 text-sm font-bold text-emerald-700 underline">Kalemleri yeniden yükle</button></div>}
+          {!progress.complete && <div className="mt-5 rounded-2xl border border-slate-200 p-5">
+            <h3 className="font-bold text-lg">Alış faturasından kalemleri seç</h3>
+            <p className="mt-1 text-sm text-slate-500">Bir veya birden fazla kalem seçebilirsiniz. Kesilecek tonaj, seçilen kalemlerin alış miktarları oranında dağıtılır.</p>
+            {linesLoading && <p className="mt-3">Kalemler yükleniyor…</p>}
+            {lineError && <p role="alert" className="mt-3 text-sm font-bold text-red-700">{lineError}</p>}
+            <div className="mt-4 grid gap-3">{sourceLines.map(line => {
+              const selected = sourceLineIds.includes(line.id);
+              const total = sourceLines.filter(l => sourceLineIds.includes(l.id)).reduce((sum, l) => sum + l.tons, 0);
+              const allocated = selected && total > 0 ? selectedTons * line.tons / total : 0;
+              return <div key={line.id} className={`rounded-xl border p-4 ${selected ? "border-emerald-500 bg-emerald-50" : "border-slate-200"}`}>
+                <p className="font-bold">{line.name}</p>
+                <p className="mt-1 text-sm text-slate-600">Alış miktarı: {formatNumber(line.tons)} ton · KDV: %{line.vatRate} · Tutar: {formatMoney(line.amount)}</p>
+                <p className="mt-1 text-sm">Kalan: {formatNumber(line.remainingTons)} ton</p>
+                <button type="button" aria-pressed={selected} disabled={Boolean(lineError) || lineLocked || creating || linesLoading || (!selected && line.remainingTons<=0)}
+                  onClick={()=>setSourceLineIds(ids => selected ? ids.filter(id => id !== line.id) : [...ids,line.id])}
+                  className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">{selected ? (lineLocked ? "Seçili kalem" : "Seçili · Seçimi kaldır") : "Kalemi seç"}</button>
+                {selected && <p className="mt-2 text-sm font-bold">Bu faturada: {formatNumber(allocated)} ton</p>}
+                {selected && allocated>line.remainingTons+.000001 && <p className="mt-2 text-sm text-amber-800">Bu kalemin kalan miktarı yetersiz. Diğer kalemleri de seçin veya kesilecek tonajı azaltın.</p>}
+              </div>;
+            })}</div>
+            <button type="button" onClick={loadSourceLines} disabled={linesLoading || creating} className="mt-3 text-sm font-bold text-emerald-700 underline">Kalemleri yeniden yükle</button>
+          </div>}
+
           {!progress.complete && <div className="mt-5"><label className="block text-sm font-bold">Bu faturada kesilecek tonaj<input type="number" min="0.000001" max={progress.remainingTons} step="0.000001" value={invoiceTons} onChange={e=>setInvoiceTons(e.target.value)} className="mt-2 block w-full rounded-xl border border-slate-200 px-4 py-3 sm:max-w-xs" /></label><p className="mt-3 font-bold text-emerald-800">Kesilecek tutar (KDV dahil): {formatMoney(amountForPart)}</p><p className="mt-1 text-sm text-slate-500">Tutar siparişin satış fiyatına göre hesaplanır; kalan tonaj ve tutar aşılamaz.</p>{invalidPart && <p role="alert" className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">{progress.blocked ? progress.overbilled ? "Kayıtlı faturalar teslim tonajını veya tutarını aşıyor. Teslim bilgilerini ve mevcut faturaları kontrol edin; yeni fatura oluşturulamaz." : "Önceki faturanın resmileştirmesi kontrol bekliyor. Paraşüt üzerinde kontrol edin; yeniden kesmeyin." : `Kesilecek tonaj 0'dan büyük ve en fazla ${formatNumber(progress.remainingTons)} ton olmalı. Fatura tutarı ${formatMoney(progress.remainingTotal)} sınırını aşamaz.`}</p>}</div>}
           {progress.history.length>0 && <div className="mt-5 space-y-2"><h3 className="font-bold">Bu siparişin satış faturaları</h3>{progress.history.map((row:any)=><div key={row.id} className="flex flex-wrap justify-between gap-2 rounded-xl border border-slate-100 p-3 text-sm"><span className="font-bold">{row.invoice_no || row.id}</span><span>{formatNumber(Number(row.tons))} ton · {formatMoney(row.amount)}</span><span className={row.state==='needs_review'||row.state==='created' ? "text-amber-800" : "text-emerald-800"}>{row.state==='needs_review'||row.state==='created' ? "Resmileştirme kontrolü bekliyor" : row.state==='legacy' ? "Kayıtlı fatura" : "Resmileştirme başlatıldı"}</span></div>)}</div>}
         </section>}
@@ -467,7 +489,7 @@ const selectedCustomer = contacts.find(
             <button
               type="button"
               onClick={createPreview}
-              disabled={creating || !selectedCustomerId || invalidPart || !sourceLineId || Boolean(lineError) || linesLoading}
+              disabled={creating || !selectedCustomerId || invalidPart || !sourceLineIds.length || Boolean(lineError) || linesLoading}
               className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white disabled:opacity-50"
             >
               {creating ? "Hazırlanıyor..." : "Önizleme Oluştur"}
@@ -530,7 +552,7 @@ const selectedCustomer = contacts.find(
               </div>
 
               <div className="rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-800 ring-1 ring-amber-100">
-                Seçilen alış kalemi ve KDV oranı aktarıldı. Müşteri, miktar, satış fiyatı ve KDV dahil toplamı kontrol ederek onaylayın.
+                Seçilen alış kalemleri ve KDV oranları aktarıldı. Müşteri, miktar, satış fiyatı ve KDV dahil toplamı kontrol ederek onaylayın.
               </div>
 
               <button

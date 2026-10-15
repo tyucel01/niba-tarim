@@ -59,3 +59,18 @@ test('27-ton purchase line supports a 27-ton invoice against 54-ton delivery wit
  bill.included[1].attributes.name='  ';
  assert.equal(ctx.buildSalesInvoicePayload(args).preview.details[0].product_name,'SUP-00123');
  });
+
+test('two 26.5-ton purchase lines create one 53-ton invoice and proportional partial invoices',()=>{
+ const bill={data:{attributes:{currency:'TRL',net_total:1425700}},included:['a','b'].map(id=>({id,type:'purchase_bill_details',attributes:{description:'20-20-0',quantity:26500,unit:'kg',unit_price:26.9,net_total:712850,vat_rate:0}}))};
+ const args={order:{teslimOlanTonaj:53,alisFiyati:26900,pesinSatisFiyati:27250},customerId:'customer',purchaseBill:bill,sourceLineIds:['a','b'],invoiceTons:53};
+ const result=ctx.buildSalesInvoicePayload(args);
+ assert.equal(result.preview.details.length,2);
+ assert.equal(result.preview.estimatedTotal,1444250);
+ assert.equal(result.payload.data.relationships.details.data[0].attributes.quantity,26500);
+ assert.equal(result.payload.data.relationships.details.data[1].attributes.quantity,26500);
+ const partial=ctx.buildSalesInvoicePayload({...args,invoiceTons:26.5});
+ assert.equal(partial.preview.details[0].quantity,13250);assert.equal(partial.preview.details[1].quantity,13250);
+ assert.throws(()=>ctx.buildSalesInvoicePayload({...args,sourceLineIds:['a']}),/tonajı/);
+ assert.throws(()=>ctx.buildSalesInvoicePayload({...args,sourceLineIds:['a','a']}),/birden fazla/);
+ assert.throws(()=>ctx.buildSalesInvoicePayload({...args,sourceLineIds:['a','missing']}),/bulunamadı/);
+});
