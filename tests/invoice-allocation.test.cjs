@@ -43,3 +43,19 @@ test('selected source line invoices only its product, quantity and VAT',()=>{
  const choices=ctx.buildSalesInvoicePayload({order,customerId:'',purchaseBill:bill,sourceOnly:true});assert.equal(choices.preview.sourceLines.length,2);
 });
 test('27-ton purchase line supports a 27-ton invoice against 54-ton delivery without consuming the other 27 tons',()=>{const bill={data:{attributes:{currency:'TRL',net_total:785700}},included:[{type:'purchase_bill_details',id:'line-27',attributes:{description:'20-20-0 Zn',quantity:27000,unit:'kg',unit_price:29.1,net_total:785700,vat_rate:0}}]};const order={teslimOlanTonaj:54,alisFiyati:29100,pesinSatisFiyati:29500,purchase_difference_mode:'accept',matched_purchase_allocated_amount:785700};const result=ctx.buildSalesInvoicePayload({order,customerId:'customer',sourceLineId:'line-27',purchaseBill:bill,invoiceTons:27});assert.equal(result.preview.details[0].quantity,27000);assert.equal(result.preview.estimatedTotal,796500);assert.equal(result.preview.remainingTons,27);assert.throws(()=>ctx.buildSalesInvoicePayload({order,customerId:'customer',sourceLineId:'line-27',purchaseBill:bill,invoiceTons:54}),/kesilecek tonajı/);});
+
+ test('mapped stock name replaces supplier product code in choices, preview and sales payload',()=>{
+ const order={teslimOlanTonaj:2,alisFiyati:5000,pesinSatisFiyati:6000};
+ const detail={id:'mapped-line',type:'purchase_bill_details',attributes:{description:'SUP-00123',product_name:'SUP-00123',quantity:2000,unit:'kg',net_total:10000,vat_rate:0},relationships:{product:{data:{id:'stock-1',type:'products'}}}};
+ const bill={data:{attributes:{currency:'TRL',net_total:10000}},included:[detail,{id:'stock-1',type:'products',attributes:{name:'20-20-0 Zn'}}]};
+ const args={order,customerId:'customer',purchaseBill:bill,sourceLineId:'mapped-line',invoiceTons:2};
+ const result=ctx.buildSalesInvoicePayload(args);
+ assert.equal(ctx.buildSalesInvoicePayload({...args,sourceOnly:true}).preview.sourceLines[0].name,'20-20-0 Zn');
+ assert.equal(result.preview.details[0].product_name,'20-20-0 Zn');
+ const line=result.payload.data.relationships.details.data[0];
+ assert.equal(line.attributes.description,'20-20-0 Zn');
+ assert.equal(line.relationships.product.data.id,'stock-1');
+ assert.equal(line.attributes.quantity,2000);assert.equal(result.preview.estimatedTotal,12000);
+ bill.included[1].attributes.name='  ';
+ assert.equal(ctx.buildSalesInvoicePayload(args).preview.details[0].product_name,'SUP-00123');
+ });

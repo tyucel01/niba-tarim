@@ -258,7 +258,7 @@ function buildSalesInvoicePayload({
     const normalizedUnit = unit.toLocaleLowerCase("tr-TR").replace(/\./g, "");
     const tons = ["kg","kilogram","kilogramme"].includes(normalizedUnit) ? quantity / 1000 : ["ton","t","tonne","tonnes","mt"].includes(normalizedUnit) ? quantity : 0;
     if (!(tons > 0)) throw new Error("Alış faturasında kg/ton dışında birim var. Teslim tonajına göre otomatik fatura oluşturulamaz.");
-    return { row, quantity, tons, vatRate, net, unit, productId, name: clean(attr.description || product?.attributes?.name || attr.product_name) };
+    return { row, quantity, tons, vatRate, net, unit, productId, name: clean(product?.attributes?.name) || clean(attr.product_name) || clean(attr.description) };
   });
   const choices = allSourceLines.map((line: any) => ({ id: String(line.row.id || ""), name: line.name, tons: line.tons, quantity: line.quantity, unit: line.unit, vatRate: line.vatRate, amount: line.net * (1 + line.vatRate / 100) }));
   if (choices.some((line: any) => !line.id)) throw new Error("Alış faturası kalem kimlikleri alınamadı. Faturayı yeniden yükleyin.");

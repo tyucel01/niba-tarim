@@ -22,6 +22,8 @@ export default function FaturaKesPage() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [contactError, setContactError] = useState("");
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactNotice, setContactNotice] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -36,6 +38,7 @@ export default function FaturaKesPage() {
 
   useEffect(() => {
     if (!order || contacts.length === 0) return;
+    if (selectedCustomerId && contacts.some(c => String(c.id) === selectedCustomerId)) return;
 
     const match = findBestContactMatch(order.bayi, contacts);
 
@@ -78,41 +81,35 @@ export default function FaturaKesPage() {
       setOrder(foundOrder || null);
       if (foundOrder) setInvoiceTons(String(salesProgress(foundOrder).remainingTons));
 
-      let contactsRes = await fetch("/api/admin/parasut/contacts", {
-        cache: "no-store",
-      });
-
-      if (contactsRes.status === 429) {
-        await sleep(1600);
-        contactsRes = await fetch("/api/admin/parasut/contacts", {
-          cache: "no-store",
-        });
-      }
-
-      const contactsData = await contactsRes.json().catch(() => null);
-
-      if (!contactsRes.ok || !contactsData?.success) {
-        setContactError(
-          contactsRes.status === 429
-            ? "Paraşüt cari kart servisi çok sık çağrıldı. Biraz bekleyip tekrar yenile."
-            : contactsData?.error || "Cari kartlar alınamadı."
-        );
-        setContacts([]);
-        return;
-      }
-
-      const rawContacts =
-        contactsData.contacts ||
-        contactsData.items ||
-        contactsData.data ||
-        contactsData.rows ||
-        [];
-
-      setContacts(Array.isArray(rawContacts) ? rawContacts : []);
+      await loadContacts();
     } catch (err: any) {
       await panelAlert(err?.message || "Veriler alınamadı.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadContacts(refresh = false) {
+    setContactsLoading(true);
+    setContactError("");
+    setContactNotice("");
+    try {
+      const res = await fetch(`/api/admin/parasut/contacts${refresh ? "?refresh=1" : ""}`, { cache: "no-store" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.error || "Müşteri listesi alınamadı. Biraz sonra tekrar deneyin.");
+      const rows = data.contacts || data.items || data.data || data.rows;
+      if (!Array.isArray(rows)) throw new Error("Müşteri listesi alınamadı.");
+      setContacts(rows);
+      if (selectedCustomerId && !rows.some(c => String(c.id) === selectedCustomerId)) {
+        setSelectedCustomerId("");
+        setPreview(null);
+      }
+      if (data.stale) setContactError(data.warning || "Güncel liste alınamadı. Kayıtlı müşteriler gösteriliyor.");
+      else if (refresh) setContactNotice("Müşteri listesi güncellendi.");
+    } catch (err: any) {
+      setContactError(err?.message || "Müşteri listesi güncellenemedi.");
+    } finally {
+      setContactsLoading(false);
     }
   }
 
@@ -360,6 +357,12 @@ const selectedCustomer = contacts.find(
             <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">
               Paraşüt Müşteri Cari Kartı
             </p>
+            <button type="button" onClick={() => loadContacts(true)} disabled={contactsLoading || creating}
+              className="mt-3 rounded-xl border border-emerald-600 px-4 py-2 text-sm font-bold text-emerald-700 disabled:opacity-50">
+              {contactsLoading ? "Güncelleniyor…" : "Müşterileri güncelle"}
+            </button>
+            {contactNotice && <p role="status" className="mt-2 text-sm font-bold text-emerald-700">{contactNotice}</p>}
+
 
             {contactError && (
               <div className="mt-4 rounded-2xl bg-red-50 p-4 text-sm font-bold text-red-700 ring-1 ring-red-100">
@@ -699,8 +702,4 @@ function InfoRow({ label, value }: { label: string; value: any }) {
       </p>
     </div>
   );
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
