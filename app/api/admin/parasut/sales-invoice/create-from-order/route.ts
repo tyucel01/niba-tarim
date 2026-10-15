@@ -302,7 +302,7 @@ function buildSalesInvoicePayload({
         item_type: "invoice",
         e_invoice: true,
         description: clean(order.plaka) || "",
-        invoice_note: ["İrsaliye yerine geçer.", clean(order.plaka) ? `Plaka: ${clean(order.plaka)}` : ""].filter(Boolean).join(" "),
+        invoice_note: clean(order.plaka) ? `Plaka: ${clean(order.plaka)}` : "",
         issue_date: today(),
         due_date: order.vadeTarihi || today(),
         currency: "TRL",
