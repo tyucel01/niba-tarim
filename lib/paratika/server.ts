@@ -75,9 +75,8 @@ export async function reconcilePayment(db:PosDb,payment:PosPayment){
   const config=posConfig(process.env,payment.merchant);if(payment.mode!==config.mode||payment.merchant!==config.merchant)throw new Error('Ödeme ortamı/üye iş yeri ayarı uyuşmuyor.');
   if(payment.status!=='paid' && payment.last_checked_at && Date.now()-Date.parse(payment.last_checked_at)<30000) return payment;
   if(payment.status!=='paid'){
-    let result=verifyQuery(payment,await posRequest('QUERYTRANSACTION',{MERCHANTPAYMENTID:payment.merchant_payment_id,FORGROUP:'NO',OFFSET:'0',LIMIT:'100'},fetch,payment.merchant));
-    if(result.status==='failed' && Date.parse(payment.expires_at)+120000>Date.now()) result={status:'pending',reason:'Oturum açık; sonuç kesinleşmeden yeni tahsilat başlatmayın.'};
-    const {data,error}=await db.rpc('record_paratika_check',{p_id:payment.id,p_status:result.status,p_transaction:result.transactionId||null,p_note:result.reason,p_paid_date:result.paidDate||null});
+    const result=verifyQuery(payment,await posRequest('QUERYTRANSACTION',{MERCHANTPAYMENTID:payment.merchant_payment_id,FORGROUP:'NO',OFFSET:'0',LIMIT:'100'},fetch,payment.merchant));
+    const {data,error}=await db.rpc('record_paratika_check',{p_id:payment.id,p_status:result.status,p_transaction:result.transactionId||null,p_note:result.status==='pending'&&payment.check_note?.startsWith('Paratika dönüş kodu:')?payment.check_note:result.reason,p_paid_date:result.paidDate||null});
     if(error||!data)throw new Error('Ödeme sorgu sonucu kaydedilemedi.');
     payment=data as PosPayment;
   }

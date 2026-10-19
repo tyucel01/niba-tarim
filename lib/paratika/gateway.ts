@@ -91,6 +91,7 @@ export function verifyQuery(payment: PosPayment, data: any): VerifiedResult {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(paidDate) || !Number.isFinite(Date.parse(paidDate)) || new Date(paidDate).toISOString().slice(0,10)!==paidDate) return {status:"review",reason:"Banka işlem tarihi doğrulanamadı."};
     return {status:"paid",transactionId:t.pgTranId,paidDate,reason:"Paratika üzerinden tahsilat doğrulandı."};
   }
+  if (!list.length)return {status:'pending',reason:'Paratika sorgusunda henüz satış kaydı bulunamadı. Yeniden ödeme başlatmadan sonucu kontrol edin.'};
   if (sales.length && sales.every((t: any) => ["FA","CA","VD"].includes(t.transactionStatus))) return {status:"failed",reason:"Onaylanmış tahsilat bulunmuyor."};
   return {status:"pending",reason:"Ödeme sonucu bekleniyor; yeniden tahsilat başlatmayın."};
 }
@@ -134,4 +135,13 @@ export function requireSessionToken(response:any):string {
  }
  if(typeof response.sessionToken!=='string'||! /^[A-Za-z0-9]{20,64}$/.test(response.sessionToken))throw new PaymentSessionError('SESSION_TOKEN_FORMAT',false,'Paratika oturum yanıtı doğrulanamadı. İşlem kontrol edilmeli.');
  return response.sessionToken;
+}
+
+// Callback codes are useful diagnostics, never proof of a paid/failed transaction.
+export function callbackNotice(params:URLSearchParams):string|null{
+ const raw=params.get('errorCode')||params.get('ERRORCODE')||params.get('pgTranErrorCode')||params.get('responseCode');
+ if(!raw||raw==='00'||! /^[A-Za-z0-9_-]{1,40}$/.test(raw))return null;
+ const detail=(params.get('errorMsg')||params.get('responseMsg')||'').toUpperCase();
+ const fields=['PAYMENTSYSTEM','INSTALLMENTCOUNT','ORDERITEMS','EXTRA','CARDEXPIRY','EXPIRYMONTH','EXPIRYYEAR','CUSTOMEREMAIL'].filter(k=>detail.includes(k));
+ return `Paratika dönüş kodu: ${raw}.${fields.length?' Alan: '+fields.join(', ')+'.':''} Bu bilgi tek başına ödeme sonucu değildir; banka sorgusu ile kontrol ediliyor. Yeniden ödeme başlatmayın.`;
 }
