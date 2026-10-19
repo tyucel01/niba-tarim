@@ -3,7 +3,7 @@
  * Sipariş aktarır; panelden kesilmiş faturaların durumunu yalnızca AH sütununa yazar.
  * Yeni fatura oluşturmaz. Deneme aktarımında hiçbir Sheet hücresi değiştirilmez.
  */
-const NIBA_SYNC_START_DATE = '2026-09-14'; // Sabit başlangıç: satış tarihi bu gün ve sonrası.
+const NIBA_SYNC_START_DATE = '2023-09-14'; // Sabit başlangıç: satış tarihi bu gün ve sonrası.
 const NIBA_HEADER_ROW = 2; // Başlıklar 2. satırda, veriler 3. satırda başlar.
 const NIBA_ENDPOINT = 'https://www.nibatarim.com/api/integrations/sheets/orders';
 const NIBA_COLUMNS = {
@@ -36,6 +36,8 @@ function nStatus(field, value) {
     if(key==='bekliyor') return 'Bekliyor';
   }
   if(field==='sevkDurumu') {
+    // Araç takip metnini Sheet'te korur; numaralı yolda durumunu panele kısmi sevk olarak gönderir.
+    if(/^\d+yolda$/.test(key)) return 'Kısmi Sevk';
     if(['evet','sevkedildi','yapildi','true','1'].includes(key)) return 'Sevk Edildi';
     if(['tamam','tamamlandi'].includes(key)) return 'Tamamlandı';
     if(['hayir','yok','bekliyor','false','0'].includes(key)) return 'Bekliyor';
@@ -98,7 +100,7 @@ function nLoadRows(spreadsheetId, sheetName) {
   }
   return nReadRows(response.values || []);
 }
-function nRunCore(forceDryRun) {
+function nRunCore(forceDryRun, referenceOnly = false) {
 
     const properties=PropertiesService.getScriptProperties();
     const secret=properties.getProperty('SHEETS_SYNC_SECRET');
@@ -106,23 +108,23 @@ function nRunCore(forceDryRun) {
     const spreadsheetId=properties.getProperty('SPREADSHEET_ID');
     const sheetName=properties.getProperty('SHEET_NAME');
     if(!secret||secret.length<32||!sourceId||!spreadsheetId||!sheetName) throw new Error('Script Properties ayarları eksik.');
-    const dryRun=forceDryRun || properties.getProperty('DRY_RUN')!=='false';
+    const dryRun=referenceOnly || forceDryRun || properties.getProperty('DRY_RUN')!=='false';
     const started=Date.now(), allRows=nLoadRows(spreadsheetId,sheetName);
-    const scope=nDateScope(allRows), rows=scope.rows;
-    const progressKey=dryRun?'NIBA_PROGRESS_DRY_V4':'NIBA_PROGRESS_LIVE_V4';
-    // Fingerprints contain no customer details or secret. Changed/sorted data starts a fresh pass.
+    const scope=nDateScope(allRows), rows=referenceOnly?scope.rows:scope.rows.slice().reverse();
+    const progressKey=referenceOnly?'NIBA_PROGRESS_REFERENCE_V3':dryRun?'NIBA_PROGRESS_DRY_V5':'NIBA_PROGRESS_LIVE_V5';
+    // Keep the cursor across value edits. New rows start a new pass from the latest rows.
     const fingerprint=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,
-      JSON.stringify([NIBA_SYNC_START_DATE,sourceId,spreadsheetId,sheetName,rows]),Utilities.Charset.UTF_8).join(',');
+      JSON.stringify([NIBA_SYNC_START_DATE,sourceId,spreadsheetId,sheetName,rows.map(row=>String(row.values.satisId))]),Utilities.Charset.UTF_8).join(',');
     let progress;
     try { progress=JSON.parse(properties.getProperty(progressKey)||'null'); } catch (_) {}
     if(!progress||progress.fingerprint!==fingerprint||!Number.isInteger(progress.offset)||progress.offset<0||progress.offset>rows.length) {
       progress={fingerprint,offset:0,counts:{},issues:[],reasons:{},fields:{}};
     }
     const resumedFrom=progress.offset;
-    for(let offset=progress.offset;offset<rows.length;offset+=50) {
+    for(let offset=progress.offset;offset<rows.length;offset+=25) {
       // Leave time for the last request and checkpoint; process at most 200 rows per run.
-      if(Date.now()-started>180000||offset-resumedFrom>=200) break;
-      const batch=rows.slice(offset,offset+50);
+      if(Date.now()-started>45000||offset-resumedFrom>=200) break;
+      const batch=rows.slice(offset,offset+25);
       const payload=JSON.stringify({sourceId,snapshotAt:new Date().toISOString(),dryRun,rows:batch});
       if(Utilities.newBlob(payload).getBytes().length>256000) throw new Error('Satır grubu çok büyük; uzun notları kısaltın.');
       let response;
@@ -145,7 +147,7 @@ function nRunCore(forceDryRun) {
           if(progress.issues.filter(issue=>issue.status===r.status).length<4) progress.issues.push(detail);
         }
       });
-      if(!dryRun) nQueueMail(nBatchReport(body.results,batch));
+      if(!dryRun || referenceOnly) nQueueBatchReports(body.results,batch,referenceOnly);
       progress.offset=offset+batch.length;
       properties.setProperty(progressKey,JSON.stringify(progress));
     }
@@ -153,9 +155,9 @@ function nRunCore(forceDryRun) {
     const summary={at:new Date().toISOString(),dryRun,startDate:NIBA_SYNC_START_DATE,sheetTotal:allRows.length,excludedBeforeStart:scope.old,excludedMissingOrInvalidDate:scope.invalid,dateIssueRows:scope.examples,total:rows.length,
       processed:progress.offset,remaining:rows.length-progress.offset,complete,
       thisRun:progress.offset-resumedFrom,counts:progress.counts,reasons:progress.reasons,fields:progress.fields,issues:progress.issues,
-      bilgi:complete?'Kontrol tamamlandı.':'Aynı işlevi tekrar çalıştırın; kaldığı yerden devam edecek.'};
+      bilgi:complete?'Kontrol tamamlandı.':dryRun&&!referenceOnly?'Deneme tamamlanmadı; aynı işlevle devam edebilirsiniz.':'Otomatik devam planlanacak; yeniden başlatmayın.'};
     if(complete) properties.deleteProperty(progressKey);
-    properties.setProperty('LAST_SYNC_SUMMARY',JSON.stringify(summary));
+    properties.setProperty(referenceOnly?'LAST_REFERENCE_SUMMARY':'LAST_SYNC_SUMMARY',JSON.stringify(summary));
     console.log(JSON.stringify(summary));
     return summary;
 
@@ -270,11 +272,14 @@ function nBatchReport(results,batch) {
       lines.push(prefix+' — Sipariş güncellendi.');
       const changes=Array.isArray(result.changes)?result.changes:[];
       const known=changes.filter(c=>Object.prototype.hasOwnProperty.call(NIBA_COLUMNS,c.field));
-      if(!known.length) lines.push('  Alan ayrıntısı sunucudan gelmedi; SQL rapor güncellemesini kontrol edin.');
+      if(!known.length) lines.push('  Sipariş panele aktarıldı; alan ayrıntısı sunucudan gelmedi.');
       known.forEach(c=>lines.push('  '+NIBA_COLUMNS[c.field][0]+': '+nMailValue(c.before)+' → '+nMailValue(c.after)));
+      const protectedFields=(result.reviewFields||[]).filter(field=>Object.prototype.hasOwnProperty.call(NIBA_COLUMNS,field));
+      if(protectedFields.length) lines.push('  Faturalı kayıtta korunan alanlar: '+protectedFields.map(field=>NIBA_COLUMNS[field][0]).join(', '));
     } else {
       const issue=nSafeIssue(result,row.values);
-      lines.push(prefix+' — Aktarılamadı: '+issue.neden+(issue.alanlar.length?' | Alanlar: '+issue.alanlar.join(', '):''));
+      const label=result.status==='review'?'Kontrol gerekli; faturalı kayıt değiştirilmedi: ':result.status==='conflict'?'Eşleşme kontrolü gerekli; kayıt değiştirilmedi: ':'Aktarılamadı: ';
+      lines.push(prefix+' — '+label+issue.neden+(issue.alanlar.length?' | Alanlar: '+issue.alanlar.join(', '):''));
     }
   });
   return lines.join('\n');
@@ -283,11 +288,66 @@ function nMailValue(value) {
   if(value===null||value===undefined||value==='') return '(boş)';
   return String(value).replace(/[\r\n]+/g,' ');
 }
-// Pending reports are private script properties; never log report contents.
-function nQueueMail(body) {
-  if(!body) return;
-  const p=PropertiesService.getScriptProperties(), stamp=Date.now()+'_'+Utilities.getUuid();
-  const parts={};
+// Per-sale notification memory survives completed transfer passes.
+// Only hashes are retained; row positions and report timestamps do not create new events.
+function nNoticeKey(id) {
+  const p=PropertiesService.getScriptProperties();
+  return 'NIBA_NOTICE_V1_'+nReportId(JSON.stringify([p.getProperty('SHEETS_SYNC_SOURCE_ID'),p.getProperty('SPREADSHEET_ID'),p.getProperty('SHEET_NAME'),id]));
+}
+function nStableNotice(value) {
+  if(Array.isArray(value)) return value.map(nStableNotice);
+  if(value&&typeof value==='object') {
+    const out={};Object.keys(value).sort().forEach(key=>out[key]=nStableNotice(value[key]));return out;
+  }
+  return value;
+}
+function nSameNoticeValue(before,after) {
+  if(before===after) return true;
+  if((before===null||before==='')&&(after===null||after==='')) return true;
+  // Database numeric values and equivalent text formatting are the same change.
+  if(typeof before==='number'&&typeof after==='string'&&!nNumberProblem(after)) {
+    let text=after.trim().replace(/\s|₺|TL/gi,'');
+    if(/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(text)) text=text.replace(/\./g,'');
+    return before===Number(text.replace(',','.'));
+  }
+  return false;
+}
+function nQueueBatchReports(results,batch,referenceOnly = false) {
+  const p=PropertiesService.getScriptProperties(),saved=p.getProperties(),updates={},reports=[];
+  results.forEach(result=>{
+    const row=batch.find(item=>item.rowNumber===result.rowNumber);
+    if(!row||!row.values||!row.values.satisId) return;
+    const key=nNoticeKey(String(row.values.satisId));
+    if(referenceOnly && (saved[key] || ['inserted','updated'].includes(result.status))) return;
+    if(result.status==='unchanged') {updates[key]='ok';return;}
+    const event={...result};
+    if(result.status==='updated'&&Array.isArray(result.changes)) {
+      event.changes=result.changes.filter(change=>Object.prototype.hasOwnProperty.call(NIBA_COLUMNS,change.field)&&!nSameNoticeValue(change.before,change.after));
+      if(result.changes.length && !event.changes.length && result.changes.every(change=>Object.prototype.hasOwnProperty.call(NIBA_COLUMNS,change.field))) {updates[key]='ok';return;}
+    }
+    const fields=Array.isArray(event.fields)?[...new Set(event.fields)].sort():[];
+    const relevantValues=event.status==='review'&&fields.length
+      ? Object.fromEntries(fields.filter(field=>Object.prototype.hasOwnProperty.call(NIBA_COLUMNS,field)).map(field=>[field,row.values[field]]))
+      : row.values;
+    const signature=nReportId(JSON.stringify(nStableNotice({status:event.status,message:event.message||'',fields,changes:event.changes||[],values:relevantValues})));
+    if(saved[key]===signature) return;
+    const report=nBatchReport([event],[row]);
+    if(!report) return;
+    reports.push(report);updates[key]=signature;
+  });
+  // Queue content and its notification memory together; failed queuing is retryable.
+  nQueueMail(reports.join('\n'),updates,false,referenceOnly);
+}
+// Pending reports remain private and keep their original retry IDs until acknowledged.
+function nQueueMail(body,noticeUpdates,force,rememberOnly = false) {
+  const p=PropertiesService.getScriptProperties(),parts={...(noticeUpdates||{})};
+  if(!body||rememberOnly) {if(Object.keys(parts).length)p.setProperties(parts);return;}
+  if(!noticeUpdates&&!force) {
+    const key=nNoticeKey('__sync_error__'),signature=nReportId(body);
+    if(p.getProperty(key)===signature) return;
+    parts[key]=signature;
+  }
+  const stamp=Date.now()+'_'+Utilities.getUuid();
   for(let i=0;i<body.length;i+=1500) parts['NIBA_MAIL_'+stamp+'_'+String(i/1500).padStart(4,'0')]=body.slice(i,i+1500);
   p.setProperties(parts);
 }
@@ -322,21 +382,27 @@ function nFlushMail() {
 }
 function nRun(forceDryRun) {
   const lock=LockService.getScriptLock();
-  if(!lock.tryLock(1000)) throw new Error('Başka bir aktarım çalışıyor.');
+  if(!lock.tryLock(1000)) {
+    console.log('Başka bir aktarım çalışıyor. Normal aktarım yaklaşık 1 dakika sonra tekrar denenecek.');
+    if(!forceDryRun) nNormalDevamiPlanla();
+    return {complete:false,bilgi:'Başka bir aktarım çalışıyor; devam planlandı.'};
+  }
   const live=!forceDryRun&&PropertiesService.getScriptProperties().getProperty('DRY_RUN')==='false';
   try {
-    if(live) nFlushMail();
+    if(live) nNormalDevamTemizle();
+    // A mail outage must not prevent Sheet changes from reaching the panel.
+    if(live) nGuvenliMailGonder();
     let summary;
-    try { summary=nRunCore(forceDryRun); }
+    try { summary=nRunCore(forceDryRun); if(live) PropertiesService.getScriptProperties().deleteProperty(nNoticeKey('__sync_error__')); }
     catch (error) {
       if(live) {
         nQueueMail('Aktarım tamamlanamadı. Bazı kayıtlar işlenmiş olabilir. Apps Script yürütme kaydını kontrol edin; aynı aktarım tekrar denenebilir.');
-        nFlushMail();
+        nGuvenliMailGonder();
       }
       throw error;
     }
-    // Invoice marks are refreshed at the existing transfer times, with no extra trigger.
-    try {
+    // Refresh AH once after the complete order pass, not once per 200-row page.
+    if(summary.complete) try {
       summary.fatura=nInvoiceStatuses(!live);
       PropertiesService.getScriptProperties().setProperty('LAST_SYNC_SUMMARY',JSON.stringify(summary));
     } catch (_) {
@@ -344,7 +410,10 @@ function nRun(forceDryRun) {
       PropertiesService.getScriptProperties().setProperty('LAST_SYNC_SUMMARY',JSON.stringify(summary));
       console.log('AH fatura durumu güncellenemedi. Sheet yazma iznini, AH başlığını ve panel yayınının tamamlandığını kontrol edin.');
     }
-    if(live) nFlushMail();
+    if(live) {
+      if(!summary.complete) nNormalDevamiPlanla();
+      nGuvenliMailGonder();
+    }
     return summary;
   } finally { lock.releaseLock(); }
 }
@@ -352,7 +421,7 @@ function epostaTesti() {
   const lock=LockService.getScriptLock();
   if(!lock.tryLock(1000)) throw new Error('Başka bir aktarım çalışıyor.');
   try {
-    nQueueMail('Niba Tarım — E-posta raporu testi. Bu test sipariş veya Sheet kaydı değiştirmez.');
+    nQueueMail('Niba Tarım — E-posta raporu testi. Bu test sipariş veya Sheet kaydı değiştirmez.',null,true);
     nFlushMail();
     console.log('Test raporu gönderim sunucusu tarafından kabul edildi.');
   } finally {lock.releaseLock();}
@@ -424,4 +493,47 @@ function faturaDurumlariDeneme() {
   const lock=LockService.getScriptLock();
   if(!lock.tryLock(1000)) throw new Error('Başka bir aktarım çalışıyor.');
   try {const summary=nInvoiceStatuses(true);console.log(JSON.stringify(summary));return summary;} finally {lock.releaseLock();}
+}
+
+// Normal sync and optional reference use separate cursors and never mute each other.
+function nNormalDevamTemizle() {
+  ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==='nSiparisAktarimiDevam').forEach(t=>ScriptApp.deleteTrigger(t));
+}
+function nNormalDevamiPlanla() {
+  nNormalDevamTemizle();
+  ScriptApp.newTrigger('nSiparisAktarimiDevam').timeBased().after(60000).create();
+  console.log('Normal aktarım yaklaşık 1 dakika sonra kaldığı yerden devam edecek.');
+}
+function nSiparisAktarimiDevam() { return nRun(false); }
+function nGuvenliMailGonder() {
+  try {nFlushMail();} catch(_) {console.log('E-posta raporu gönderilemedi; kuyruk korundu. Sipariş aktarımı devam ediyor.');}
+}
+function nReferansTetikleriniTemizle() {
+  ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==='nBildirimReferansiDevam').forEach(t=>ScriptApp.deleteTrigger(t));
+}
+function nBildirimReferansiDevam() { return mevcutBildirimleriReferansAl(); }
+function mevcutBildirimleriReferansAl() {
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(1000)) {console.log('Başka bir aktarım çalışıyor; referans için yeniden deneme planlandı.');nReferansTetikleriniTemizle();ScriptApp.newTrigger('nBildirimReferansiDevam').timeBased().after(60000).create();return {complete:false};}
+  const p=PropertiesService.getScriptProperties();
+  try {
+    nReferansTetikleriniTemizle();
+    // Read-only server check. Never writes orders, suppresses normal mail or marks real updates as notified.
+    const summary=nRunCore(true,true);
+    if(!summary.complete) {
+      ScriptApp.newTrigger('nBildirimReferansiDevam').timeBased().after(60000).create();
+      console.log('Salt okunur referans: '+summary.processed+' / '+summary.total+'. Otomatik devam edecek. Normal aktarım ve değişiklik bildirimleri açıktır.');
+    } else {
+      p.deleteProperty('NIBA_NOTICE_BASELINE_V1');
+      console.log('Eski farklar bildirim hafızasına alındı. Siparişler değiştirilmedi; normal değişiklik bildirimleri açıktır.');
+    }
+    return summary;
+  } finally {lock.releaseLock();}
+}
+function aktarimDurumu() {
+  const p=PropertiesService.getScriptProperties();
+  const parse=key=>{try{return JSON.parse(p.getProperty(key)||'null');}catch(_){return null;}};
+  const summary=parse('LAST_SYNC_SUMMARY'),cursor=parse('NIBA_PROGRESS_LIVE_V5');
+  const report={sonAktarim:summary,devamNoktasi:cursor?cursor.offset:null,otomatikDevam:ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==='nSiparisAktarimiDevam').length};
+  console.log(JSON.stringify(report));return report;
 }

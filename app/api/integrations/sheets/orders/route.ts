@@ -31,12 +31,43 @@ export async function POST(request: Request) {
     // Reject duplicate IDs in the complete batch before any mutation.
     for (const row of body.rows) { const key = String(row?.values?.satisId || "").trim(); if (key && keys.has(key)) return reply({ success: false, error: "Tekrarlanan Satış ID; hiçbir satır işlenmedi." }, 400); keys.add(key); }
     const results = [];
+    let dispatchSnapshot: Map<string, Record<string, unknown>> | undefined;
     for (const [index, row] of body.rows.entries()) {
       const rowNumber = Number.isInteger(row?.rowNumber) && row.rowNumber > 0 ? row.rowNumber : index + 2;
       try {
         const values = validateValues(row?.values);
-        const { data, error } = await admin.rpc("sync_order_from_sheet", { p_source: source, p_key: values.satisId, p_values: values, p_snapshot: new Date(timestamp).toISOString(), p_dry_run: body.dryRun });
+        const sync = (input: Record<string, unknown>) => admin.rpc("sync_order_from_sheet", { p_source: source, p_key: values.satisId, p_values: input, p_snapshot: new Date(timestamp).toISOString(), p_dry_run: body.dryRun });
+        let { data, error } = await sync(values);
         if (error) return reply({ success: false, error: "Veritabanı aktarımı tamamlanamadı. Önceki satırlar işlenmiş olabilir; aynı aktarımı güvenle tekrar deneyin.", results }, 503);
+        // An old protected commercial difference must not block new dispatch updates.
+        // The database still validates conflicts, invoice quantities and all other guards.
+        if (data?.status === "review") {
+          const dispatchFields = ["plaka", "sevkYeri", "sevkDurumu", "sevkNo", "gts", "teslimOlanTonaj"];
+          const dispatch = Object.fromEntries(Object.entries(values).filter(([key]) => key === "satisId" || dispatchFields.includes(key)));
+          if (Object.keys(dispatch).length > 1) {
+            const original = data;
+            if (!dispatchSnapshot) {
+              const { data: rows, error: readError } = await admin.from("siparisler").select("satisId,plaka,sevkYeri,sevkDurumu,sevkNo,gts,teslimOlanTonaj").in("satisId", [...keys]);
+              if (readError || !rows) return reply({ success: false, error: "Sevk değişiklikleri doğrulanamadı. Aynı aktarımı yeniden deneyin.", results }, 503);
+              dispatchSnapshot = new Map(rows.map(item => [String(item.satisId), item]));
+            }
+            const current = dispatchSnapshot.get(String(values.satisId));
+            if (!current) return reply({ success: false, error: "Sevk kaydı doğrulanamadı. Aynı aktarımı yeniden deneyin.", results }, 503);
+            const changes = Object.entries(dispatch).filter(([field, after]) => {
+              if (field === "satisId") return false;
+              return field === "teslimOlanTonaj" && current[field] != null
+                ? Number(current[field]) !== Number(after)
+                : String(current[field] ?? "") !== String(after ?? "");
+            }).map(([field, after]) => ({field, before: current[field], after}));
+            if (changes.length) {
+              const safe = await sync(dispatch);
+              if (safe.error) return reply({ success: false, error: "Sevk aktarımı tamamlanamadı. Aynı aktarımı güvenle tekrar deneyin.", results }, 503);
+              if (safe.data?.status === "updated") {
+                data = {...safe.data, changes: safe.data.changes?.length ? safe.data.changes : changes, reviewFields: original.fields || [], reviewMessage: original.message};
+              } else if (safe.data?.status !== "unchanged") data = safe.data;
+            }
+          }
+        }
         results.push({ rowNumber, ...data });
       } catch (error) { results.push({ rowNumber, status: "invalid", message: error instanceof Error ? error.message : "Satır geçersiz." }); }
     }

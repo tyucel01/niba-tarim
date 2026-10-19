@@ -2,7 +2,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 function load(file,mocks={},env={}){const exports={};const code=ts.transpileModule(fs.readFileSync(path.join(root,file),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;vm.runInNewContext(code,{exports,require:n=>n in mocks?mocks[n]:require(n),process:{env},Request,Response,Buffer,Uint8Array});return exports;}
 const lib=load('lib/orders/sheets.ts');const secret='UNIT-TEST-ONLY-NOT-A-REAL-SECRET-123456';
 const row={rowNumber:2,values:{satisId:'S-1',bayi:'Demo',urun:'8.20.0',siparisTonaj:27,pesinSatisFiyati:19000}};
-function route(options={}){const calls=[];return {calls,post:load('app/api/integrations/sheets/orders/route.ts',{'@/lib/orders/sheets':lib,'next/server':{NextResponse:{json:Response.json}},'@supabase/supabase-js':{createClient:()=>({rpc:async(name,args)=>{calls.push({name,args});return options.dbError?{error:{message:'private detail'}}:{data:{status:args.p_dry_run?'updated':'inserted'},error:null}}})}},{SHEETS_SYNC_SECRET:secret,SHEETS_SYNC_SOURCE_ID:'test',SHEETS_SYNC_ENABLED:'true',...options.env}).POST};}
+function route(options={}){const calls=[];return {calls,post:load('app/api/integrations/sheets/orders/route.ts',{'@/lib/orders/sheets':lib,'next/server':{NextResponse:{json:Response.json}},'@supabase/supabase-js':{createClient:()=>({rpc:async(name,args)=>{calls.push({name,args});return options.respond?options.respond(args,calls.length):options.dbError?{error:{message:'private detail'}}:{data:{status:args.p_dry_run?'updated':'inserted'},error:null}},from:()=>{const q={select:()=>q,eq:()=>q,in:async(_field,ids)=>({data:ids.map(id=>({satisId:id,...options.before})),error:options.readError||null})};return q;}})}},{SHEETS_SYNC_SECRET:secret,SHEETS_SYNC_SOURCE_ID:'test',SHEETS_SYNC_ENABLED:'true',...options.env}).POST};}
 const req=(body={},token=secret)=>new Request('http://localhost/api/integrations/sheets/orders',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({sourceId:'test',snapshotAt:new Date().toISOString(),dryRun:true,rows:[row],...body})});
 test('secret comparisons and fail-closed configuration',async()=>{assert.equal(lib.validSecret(secret,secret),true);assert.equal(lib.validSecret('wrong',secret),false);const r=route({env:{SHEETS_SYNC_SECRET:''}});assert.equal((await r.post(req())).status,503);assert.equal(r.calls.length,0);});
 test('unauthorized, wrong source, expired timestamps and disabled writes never reach database',async()=>{for(const [options,body,token,status] of [[{}, {},'wrong',401],[{},{sourceId:'other'},secret,403],[{},{snapshotAt:'2000-01-01'},secret,400],[{env:{SHEETS_SYNC_ENABLED:'false'}},{dryRun:false},secret,409]]){const r=route(options);assert.equal((await r.post(req(body,token))).status,status);assert.equal(r.calls.length,0);}});
@@ -41,4 +41,24 @@ test('number diagnostic matches server validation and masks values without trans
   const report=script.nNumberReport([{rowNumber:3,values:{nakliye:'GizliBilgi',vadeFarki:'%9',alisFiyati:12345.67}}]);
   assert.equal(report.sorunluSutunlar.Nakliye,1);assert.equal(report.ornekler[0].satir,3);
   assert.ok(!JSON.stringify(report).includes('GizliBilgi'));assert.ok(!JSON.stringify(report).includes('12345'));
+});
+
+test('protected invoice differences do not block dispatch updates; commercial fields never enter fallback',async()=>{
+ const original={status:'review',message:'Faturalı siparişin ticari bilgileri farklı. Otomatik değiştirilmedi.',fields:['not','satisTarihi']};
+ const r=route({before:{sevkDurumu:'Bekliyor',teslimOlanTonaj:0},respond:(args,call)=>({data:call===1?original:{status:'updated'},error:null})});
+ const response=await r.post(req({dryRun:false,rows:[{rowNumber:50,values:{...row.values,not:'different',satisTarihi:'2026-10-01',sevkDurumu:'Sevk Edildi',teslimOlanTonaj:27}}]}));
+ const result=(await response.json()).results[0];assert.equal(result.status,'updated');assert.equal(r.calls.length,2);
+ assert.deepEqual(Object.keys(r.calls[1].args.p_values).sort(),['satisId','sevkDurumu','teslimOlanTonaj']);
+ assert.equal(result.changes.length,2);assert.deepEqual(result.reviewFields,['not','satisTarihi']);assert.equal(r.calls[1].args.p_dry_run,false);
+});
+test('read-only dispatch fallback stays dry; unchanged dispatch retains review instead of inventing update',async()=>{
+ const review={status:'review',fields:['not']};const r=route({before:{sevkDurumu:'Bekliyor'},respond:(args,call)=>({data:call===1?review:{status:'unchanged'},error:null})});
+ const response=await r.post(req({rows:[{rowNumber:5,values:{...row.values,not:'different',sevkDurumu:'Bekliyor'}}]}));
+ assert.equal((await response.json()).results[0].status,'review');assert.equal(r.calls.length,1);assert.equal(r.calls[0].args.p_dry_run,true);
+});
+test('protected commercial-only differences remain blocked; database dispatch conflicts remain blocked',async()=>{
+ const review={status:'review',fields:['pesinSatisFiyati']};
+ const a=route({respond:()=>({data:review,error:null})});const x=await a.post(req({dryRun:false}));assert.equal((await x.json()).results[0].status,'review');assert.equal(a.calls.length,1);
+ const b=route({before:{sevkDurumu:'Bekliyor'},respond:(args,call)=>({data:call===1?review:{status:'conflict',message:'Panelde ayrıca değiştirilen alan var; kontrol gerekli.'},error:null})});
+ const y=await b.post(req({dryRun:false,rows:[{rowNumber:5,values:{...row.values,sevkDurumu:'Sevk Edildi'}}]}));assert.equal((await y.json()).results[0].status,'conflict');
 });
