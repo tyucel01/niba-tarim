@@ -6,8 +6,14 @@ const reply=(body:unknown,status=200)=>NextResponse.json(body,{status,headers:{'
 export async function GET(req:Request){
  const db=posAdmin(),auth=await posAuth(req,db);if(auth.error)return auth.error;
  try{const c=posConfig();const {data,error}=await db.from('paratika_payments').select('*').order('created_at',{ascending:false}).limit(30);
- if(error)return reply({error:'Sanal POS kayıtları hazır değil. Kurulum kontrol edilmeli.'},503);
- return reply({ok:true,configured:c.configured&&c.enabled,mode:c.mode,merchants:MERCHANTS.map(m=>({...m,configured:posConfig(process.env,m.id).configured&&posConfig(process.env,m.id).enabled})),payments:(data||[]).map(p=>publicPayment(p as PosPayment))});}catch{return reply({error:'Sanal POS yapılandırması kontrol edilmeli.'},503);}
+ const schemaReady=!error;
+ if(error&&!['PGRST205','42703'].includes(error.code))return reply({error:'Sanal POS kayıtları okunamadı.'},503);
+ const setupIssues:string[]=[];
+ if(!schemaReady)setupIssues.push('Paratika veritabanı kurulumu bekleniyor.');
+ if(!c.enabled)setupIssues.push('Karttan tahsilat henüz etkinleştirilmedi.');
+ const merchants=MERCHANTS.map(m=>{const config=posConfig(process.env,m.id);const accountReady=c.mode!=='live'||!!process.env[`PARATIKA_${m.id}_PARASUT_ACCOUNT_ID`];return {...m,configured:schemaReady&&config.configured&&config.enabled&&accountReady,credentialsReady:config.configured,accountReady};});
+ if(merchants.some(m=>m.credentialsReady&&!m.accountReady))setupIssues.push('Tarım POS için Paraşüt tahsilat hesabı seçilmeli.');
+ return reply({ok:true,mode:c.mode,merchants,setupIssues,payments:(data||[]).map(p=>publicPayment(p as PosPayment))});}catch{return reply({error:'Sanal POS yapılandırması kontrol edilmeli.'},503);}
 }
 export async function POST(req:Request){
  const db=posAdmin(),auth=await posAuth(req,db);if(auth.error)return auth.error;

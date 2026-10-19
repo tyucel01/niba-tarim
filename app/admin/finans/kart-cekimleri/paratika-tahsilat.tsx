@@ -9,11 +9,11 @@ const labels:Record<string,string>={creating:'Hazırlanıyor',ready:'Ödeme bekl
 export default function ParatikaTahsilat({contacts,onLedgerPosted}:{contacts:Contact[];onLedgerPosted:()=>void}){
  const {panelConfirm}=usePanelDialog();const confirmRef=useRef(panelConfirm);confirmRef.current=panelConfirm;const frame=useRef<HTMLIFrameElement>(null);
  const [payments,setPayments]=useState<Payment[]>([]),[merchants,setMerchants]=useState<Merchant[]>([{id:'10013929',name:'Niba Tarım · Tarım POS',configured:false},{id:'10013922',name:'Niba Tarım · Normal POS',configured:false}]);
- const [merchant,setMerchant]=useState('10013929'),[mode,setMode]=useState('test'),[error,setError]=useState(''),[busy,setBusy]=useState(false),[connection,setConnection]=useState('');
+ const [merchant,setMerchant]=useState('10013929'),[mode,setMode]=useState('test'),[error,setError]=useState(''),[busy,setBusy]=useState(false),[connection,setConnection]=useState(''),[setupIssues,setSetupIssues]=useState<string[]>([]);
  const [contactId,setContactId]=useState(''),[amount,setAmount]=useState(''),[key,setKey]=useState(()=>crypto.randomUUID());
  const configured=Boolean(merchants.find(m=>m.id===merchant)?.configured),minor=Math.round(Number(amount||0)*100);
  async function api(path:string,method='GET',body?:unknown){const {data}=await supabase.auth.getSession();if(!data.session)throw Error('Yönetici oturumu açmanız gerekiyor.');const r=await fetch(path,{method,headers:{Authorization:`Bearer ${data.session.access_token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,cache:'no-store'});const j=await r.json();if(!r.ok)throw Error(j.error||'Sanal POS işlemi tamamlanamadı.');return j;}
- async function load(){try{const j=await api('/api/admin/paratika/payments');setPayments(j.payments||[]);setMerchants(j.merchants);setMode(j.mode);}catch(e){setError(e instanceof Error?e.message:'Tahsilatlar okunamadı.');}}
+ async function load(){try{const j=await api('/api/admin/paratika/payments');setPayments(j.payments||[]);setMerchants(j.merchants);setMode(j.mode);setSetupIssues(j.setupIssues||[]);}catch(e){setError(e instanceof Error?e.message:'Tahsilatlar okunamadı.');}}
  useEffect(()=>{void load();},[]);
  function change(){setKey(crypto.randomUUID());setError('');}
  function send(data:unknown){frame.current?.contentWindow?.postMessage(data,location.origin);}
@@ -46,6 +46,7 @@ export default function ParatikaTahsilat({contacts,onLedgerPosted}:{contacts:Con
  return <section className="mb-6 rounded-3xl border border-emerald-200 bg-white p-5 md:p-7">
   <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-bold">Paratika ile Tahsilat</h2><p className="mt-2 max-w-3xl text-sm text-slate-600">Kart bilgilerini bu panelde girin. 3D Secure sonrası doğrulanan tahsilat aynı müşterinin Paraşüt carisine işlenir. Komisyon müşteriye eklenmez.</p></div><button onClick={load} disabled={busy} className="rounded-xl border px-4 py-2 text-sm font-bold">Durumları yenile</button></div>
   {mode==='test'&&<p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-900">Test ortamı · Gerçek tahsilat ve Paraşüt kaydı oluşturulmaz.</p>}
+  {setupIssues.length>0&&<div className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{setupIssues.map(issue=><p key={issue}>{issue}</p>)}</div>}
   {error&&<p role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>}
   <div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" onClick={checkConnection} disabled={busy} className="rounded-xl border px-4 py-2 text-sm font-bold">Canlı API bağlantısını kontrol et · Para çekmez</button>{connection&&<p role="status" className="text-sm">{connection}</p>}</div>
   <div className="mt-5 grid gap-3 md:grid-cols-3">

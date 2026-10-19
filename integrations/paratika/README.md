@@ -1,6 +1,6 @@
 # Kart Çekimleri ve Paratika
 
-Mevcut Kart Çekimleri formu Paraşüt cari hareketi kaydetmeye devam eder. Bu form karttan para çekmez. Ek Paratika bölümü yeni bir ödeme bağlantısı oluşturur; yalnız banka sorgusuyla doğrulanan canlı tahsilat aynı cari için Paraşüt'e ve mevcut Kart Çekimleri listesine kaydedilir. Mevcut çekimler için yeniden ödeme bağlantısı oluşturmayın.
+Mevcut Kart Çekimleri formu Paraşüt cari hareketi kaydetmeye devam eder. Bu form karttan para çekmez. Ek Paratika bölümü panelde kart girişi ve 3D Secure akışını başlatır; yalnız banka sorgusuyla doğrulanan canlı tahsilat aynı cari için Paraşüt'e ve mevcut Kart Çekimleri listesine kaydedilir. Mevcut çekimler için yeniden ödeme bağlantısı oluşturmayın.
 
 ## Hazırlık durumu
 
