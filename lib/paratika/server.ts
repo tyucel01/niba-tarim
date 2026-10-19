@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { createCardLedgerTransaction,paratikaLedgerAccount } from "@/lib/parasut/card-ledger";
-import { checkoutUrl,digest,posConfig,posRequest,sessionParams,toMinor,verifyQuery,installmentOptions,type PosPayment } from "./gateway";
+import { checkoutUrl,digest,posConfig,posRequest,sessionParams,toMinor,verifyQuery,installmentOptions,requireSessionToken,PaymentSessionError,type PosPayment } from "./gateway";
 export function posAdmin() {return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.SUPABASE_SERVICE_ROLE_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});}
 export type PosDb = ReturnType<typeof posAdmin>;
 export async function posAuth(req:Request,db:PosDb) {
@@ -41,17 +41,21 @@ export async function createPayment(db:PosDb,input:ReturnType<typeof paymentInpu
   if(!data.created)return {payment:publicPayment(payment),checkout:null};
   try{
     const response=await posRequest('SESSIONTOKEN',sessionParams(payment,state,config.origin),fetch,input.merchant);
-    if(response.responseCode!=='00'||typeof response.sessionToken!=='string'||! /^[A-Za-z0-9]{20,64}$/.test(response.sessionToken))throw new Error('Ödeme oturumu açılamadı. Yeni tahsilat oluşturmadan durumu kontrol edin.');
-    const {data:ready,error:writeError}=await db.from('paratika_payments').update({session_token:response.sessionToken,status:'pending'}).eq('id',payment.id).eq('status','creating').select('*').maybeSingle();
-    if(writeError)throw new Error('Oturum kaydı doğrulanamadı. Yeni tahsilat başlatmayın.');
+    const sessionToken=requireSessionToken(response);
+    const {data:ready,error:writeError}=await db.from('paratika_payments').update({session_token:sessionToken,status:'pending'}).eq('id',payment.id).eq('status','creating').select('*').maybeSingle();
+    if(writeError)throw new PaymentSessionError('SESSION_STORAGE',false,'Oturum kaydı doğrulanamadı. Yeni tahsilat başlatmayın.');
     if(!ready)return {payment:publicPayment(payment),checkout:null};
     return {payment:publicPayment(ready as PosPayment),checkout:checkoutUrl(ready as PosPayment)};
-  }catch{
-    await db.from('paratika_payments').update({status:'review',check_note:'Oturum sonucu kontrol edilmeli; tekrar tahsilat başlatmayın.'}).eq('id',payment.id).eq('status','creating');
-    throw new Error('Ödeme oturumu doğrulanamadı. İşlem listeden kontrol edilmeli; tekrar tahsilat başlatmayın.');
+  }catch(error){
+    const known=error instanceof PaymentSessionError;
+    const message=known?error.message:'Ödeme oturumu yanıtı veya kayıt işlemi doğrulanamadı (SESSION_NETWORK_OR_STORAGE). İşlem listeden kontrol edilmeli; tekrar tahsilat başlatmayın.';
+    const status=known&&error.rejected?'failed':'review';
+    await db.from('paratika_payments').update({status,check_note:message}).eq('id',payment.id).eq('status','creating');
+    console.warn('paratika_session_setup',{paymentId:payment.id,code:known?error.code:'SESSION_NETWORK_OR_STORAGE',status});
+    throw new Error(message);
   }
 }
-export function publicPayment(p:PosPayment){return {id:p.id,reference:p.merchant_payment_id,customerName:p.customer_name,amountMinor:Number(p.amount_minor),currency:p.currency,status:p.status,mode:p.mode,createdAt:p.created_at,expiresAt:p.expires_at,parasutState:p.parasut_state,blockDays:3,merchant:p.merchant,installments:p.installment_count||1};}
+export function publicPayment(p:PosPayment){return {id:p.id,reference:p.merchant_payment_id,customerName:p.customer_name,amountMinor:Number(p.amount_minor),currency:p.currency,status:p.status,mode:p.mode,createdAt:p.created_at,expiresAt:p.expires_at,parasutState:p.parasut_state,blockDays:3,merchant:p.merchant,installments:p.installment_count||1,notice:p.check_note||null};}
 export async function syncLedger(db:PosDb,payment:PosPayment){
   if(payment.status!=='paid'||payment.mode!=='live'||payment.parasut_state!=='pending')return;
   const account=paratikaLedgerAccount(payment.merchant);

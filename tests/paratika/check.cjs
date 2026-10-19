@@ -53,5 +53,8 @@ assert.equal(g.verifyQuery({...p,installment_count:3,payment_system:'Bank A'},qu
 assert.equal(ledger.paratikaLedgerAccount('10013929',{PARASUT_ACCOUNT_ID:'existing'}),'existing');
 assert.equal(ledger.paratikaLedgerAccount('10013922',{PARASUT_ACCOUNT_ID:'existing'}),undefined);
 assert.equal(ledger.paratikaLedgerAccount('10013929',{PARASUT_ACCOUNT_ID:'existing',PARATIKA_10013929_PARASUT_ACCOUNT_ID:'override'}),'override');
+assert.equal(g.requireSessionToken({responseCode:'00',sessionToken:'A'.repeat(48)}),'A'.repeat(48));
+assert.throws(()=>g.requireSessionToken({responseCode:'99',errorCode:'ERR10010',errorMsg:'missing CUSTOMEREMAIL secret-example'}),e=>e.rejected&&e.message.includes('ERR10010')&&e.message.includes('CUSTOMEREMAIL')&&!e.message.includes('secret-example'));
+assert.throws(()=>g.requireSessionToken({responseCode:'00',sessionToken:'bad'}),e=>!e.rejected&&e.code==='SESSION_TOKEN_FORMAT');
 console.log('Paratika doğrulama ve mevcut Paraşüt kayıt yönleri: başarılı. Dış servise istek gönderilmedi.');
 })().catch(e=>{console.error(e);process.exitCode=1});

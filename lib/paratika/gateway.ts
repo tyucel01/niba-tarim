@@ -6,7 +6,7 @@ export type PosPayment = {
   amount_minor: number; currency: "TRY"; customer_id: string; customer_name: string;
   customer_email: string; installment_count?: number; payment_system?: string; description: string; status: PosStatus; session_token?: string | null;
   pg_transaction_id?: string | null; created_at: string; expires_at: string;
-  last_checked_at?: string | null; paid_date?: string | null; parasut_state: string; parasut_transaction_id?: string | null;
+  check_note?: string|null; last_checked_at?: string | null; paid_date?: string | null; parasut_state: string; parasut_transaction_id?: string | null;
 };
 export function toMinor(value: unknown): number {
   const text = String(value ?? "").trim();
@@ -117,4 +117,20 @@ export function installmentOptions(data:any,merchant:string,env=process.env):Ins
   }
  }
  return out.sort((a,b)=>a.count-b.count);
+}
+
+export class PaymentSessionError extends Error {
+ constructor(public code:string,public rejected:boolean,message:string){super(message);this.name='PaymentSessionError';}
+}
+export function requireSessionToken(response:any):string {
+ if(response?.responseCode!=='00'){
+  const raw=response?.errorCode||response?.ERRORCODE||response?.responseCode;
+  const code=typeof raw==='string'&&/^[A-Za-z0-9_-]{1,40}$/.test(raw)?raw:'SESSION_REJECTED';
+  // Never expose raw provider messages: they may echo request fields.
+  const detail=String(response?.errorMsg||response?.responseMsg||'').toUpperCase();
+  const fields=['CUSTOMEREMAIL','CUSTOMERNAME','CUSTOMERIP','RETURNURL','ORDERITEMS','SESSIONEXPIRY','ALLOWEDINSTALLMENTS'].filter(k=>detail.includes(k));
+  throw new PaymentSessionError(code,true,`Paratika ödeme oturumunu kabul etmedi (${code}).${fields.length?' Kontrol edilecek alan: '+fields.join(', ')+'.':''} Karttan çekim başlatılmadı.`);
+ }
+ if(typeof response.sessionToken!=='string'||! /^[A-Za-z0-9]{20,64}$/.test(response.sessionToken))throw new PaymentSessionError('SESSION_TOKEN_FORMAT',false,'Paratika oturum yanıtı doğrulanamadı. İşlem kontrol edilmeli.');
+ return response.sessionToken;
 }

@@ -3,7 +3,7 @@ import {useEffect,useRef,useState} from 'react';
 import {supabase} from '@/lib/supabase';
 import {usePanelDialog} from '@/app/admin/ui/panel-dialog';
 type Contact={id:string;name:string;email?:string};
-type Payment={id:string;reference:string;customerName:string;amountMinor:number;status:string;mode:string;parasutState:string;merchant:string;installments:number};
+type Payment={id:string;reference:string;customerName:string;amountMinor:number;status:string;mode:string;parasutState:string;merchant:string;installments:number;notice?:string|null};
 type Merchant={id:string;name:string;configured:boolean};
 const labels:Record<string,string>={creating:'Hazırlanıyor',ready:'Ödeme bekleniyor',pending:'Sonuç bekleniyor',paid:'Tahsil edildi',failed:'Onaylı tahsilat yok',review:'Kontrol gerekli'};
 export default function ParatikaTahsilat({contacts,onLedgerPosted}:{contacts:Contact[];onLedgerPosted:()=>void}){
@@ -34,9 +34,9 @@ export default function ParatikaTahsilat({contacts,onLedgerPosted}:{contacts:Con
     if(!contact||!configured||!Number.isFinite(minor)||minor<=0){send({kind:'error',message:'Önce müşteri ve geçerli tutar seçin.'});return;}
     if(!await confirmRef.current(`${contact.name} için ${(minor/100).toLocaleString('tr-TR')} TL, ${d.installments} taksit ile tahsilat başlatılacak. Komisyon müşteriye eklenmez. Onaylıyor musunuz?`)){send({kind:'error',message:'Tahsilat başlatılmadı.'});return;}
     if(!active)return;setBusy(true);setError('');
-    try{const j=await api('/api/admin/paratika/payments','POST',{key,merchant,customerId:contactId,customerName:contact.name,amount,installments:d.installments,paymentSystem:d.paymentSystem,bin:d.bin});
+    try{const j=await api('/api/admin/paratika/payments','POST',{key,merchant,customerId:contactId,customerName:contact.name,customerEmail:contact.email||undefined,amount,installments:d.installments,paymentSystem:d.paymentSystem,bin:d.bin});
      if(active&&j.checkout)send({kind:'submit',action:j.checkout});else if(active)send({kind:'error',message:'Bu işlem zaten mevcut veya kontrol bekliyor. Yeni tahsilat başlatmadan durumu kontrol edin.'});await load();
-    }catch(e){if(active){const message=e instanceof Error?e.message:'Tahsilat başlatılamadı.';setError(message);send({kind:'error',message});}}finally{if(active)setBusy(false);}
+    }catch(e){if(active){const message=e instanceof Error?e.message:'Tahsilat başlatılamadı.';setError(message);send({kind:'error',message});await load();}}finally{if(active)setBusy(false);}
    }
   }
   window.addEventListener('message',receive);return()=>{active=false;sequence++;window.removeEventListener('message',receive);};
@@ -55,7 +55,7 @@ export default function ParatikaTahsilat({contacts,onLedgerPosted}:{contacts:Con
    <label className="text-sm font-bold">Tahsilat tutarı (TL)<input type="number" min="0.01" step="0.01" value={amount} onChange={e=>{setAmount(e.target.value);change();}} disabled={busy} className="mt-1 w-full rounded-xl border p-3"/></label>
   </div>
   {!configured?<p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm">Seçilen üye iş yerinin tahsilat bağlantısı henüz açılmadı. Mevcut Paraşüt kayıt ekranını kullanmaya devam edebilirsiniz.</p>:contactId&&minor>0?<iframe key={`${merchant}:${contactId}:${key}`} ref={frame} src="/odeme/kart-formu" title="Güvenli kart girişi ve taksit seçimi" className="mt-4 min-h-[630px] w-full border-0" referrerPolicy="no-referrer"/>:<p className="mt-4 text-sm">Kart girişi için müşteri ve tutar seçin.</p>}
-  {payments.length>0&&<div className="mt-5 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-2">Müşteri / Üye iş yeri</th><th className="p-2">Tutar / Taksit</th><th className="p-2">Banka sonucu</th><th className="p-2">Paraşüt kaydı</th><th/></tr></thead><tbody>{payments.map(p=><tr key={p.id} className="border-b"><td className="p-2">{p.customerName}<span className="block text-xs text-slate-500">{p.merchant} · {p.reference}</span></td><td className="p-2">{(p.amountMinor/100).toLocaleString('tr-TR',{style:'currency',currency:'TRY'})} · {p.installments} taksit</td><td className="p-2">{labels[p.status]||'Kontrol gerekli'}</td><td className="p-2">{p.parasutState==='posted'?"Paraşüt’e işlendi":p.parasutState==='review'||p.parasutState==='posting'?'Kayıt kontrol edilmeli':p.mode==='test'?'Test · Kayıt atılmaz':'Doğrulama bekleniyor'}</td><td className="p-2"><button disabled={busy} onClick={()=>check(p.id)} className="font-bold text-emerald-800 underline">Sonucu kontrol et</button></td></tr>)}</tbody></table></div>}
+  {payments.length>0&&<div className="mt-5 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b"><th className="p-2">Müşteri / Üye iş yeri</th><th className="p-2">Tutar / Taksit</th><th className="p-2">Banka sonucu</th><th className="p-2">Paraşüt kaydı</th><th/></tr></thead><tbody>{payments.map(p=><tr key={p.id} className="border-b"><td className="p-2">{p.customerName}<span className="block text-xs text-slate-500">{p.merchant} · {p.reference}</span></td><td className="p-2">{(p.amountMinor/100).toLocaleString('tr-TR',{style:'currency',currency:'TRY'})} · {p.installments} taksit</td><td className="p-2">{labels[p.status]||'Kontrol gerekli'}{p.notice&&<span className="mt-1 block max-w-sm text-xs text-slate-600">{p.notice}</span>}</td><td className="p-2">{p.parasutState==='posted'?"Paraşüt’e işlendi":p.parasutState==='review'||p.parasutState==='posting'?'Kayıt kontrol edilmeli':p.mode==='test'?'Test · Kayıt atılmaz':'Doğrulama bekleniyor'}</td><td className="p-2"><button disabled={busy} onClick={()=>check(p.id)} className="font-bold text-emerald-800 underline">Sonucu kontrol et</button></td></tr>)}</tbody></table></div>}
   <p className="mt-4 text-xs text-slate-500">Bloke süresi: 3 gün. Net tutar doğrulanmış üye iş yeri tarifesine göre tahmin edilir; banka mutabakatı ayrıca kontrol edilir.</p>
  </section>;
 }
