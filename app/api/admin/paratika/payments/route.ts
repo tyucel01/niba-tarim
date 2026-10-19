@@ -13,7 +13,7 @@ export async function GET(req:Request){
  if(!schemaReady)setupIssues.push('Paratika veritabanı kurulumu bekleniyor.');
  if(!c.enabled)setupIssues.push('Karttan tahsilat henüz etkinleştirilmedi.');
  const merchants=MERCHANTS.map(m=>{const config=posConfig(process.env,m.id);const accountReady=c.mode!=='live'||!!paratikaLedgerAccount(m.id);return {...m,configured:schemaReady&&config.configured&&config.enabled&&accountReady,credentialsReady:config.configured,accountReady};});
- if(merchants.some(m=>m.credentialsReady&&!m.accountReady))setupIssues.push('Tarım POS için Paraşüt tahsilat hesabı seçilmeli.');
+ if(merchants.some(m=>m.credentialsReady&&!m.accountReady))setupIssues.push('İlgili POS için Paraşüt tahsilat hesabı seçilmeli.');
  return reply({ok:true,mode:c.mode,merchants,setupIssues,payments:(data||[]).map(p=>publicPayment(p as PosPayment))});}catch{return reply({error:'Sanal POS yapılandırması kontrol edilmeli.'},503);}
 }
 export async function POST(req:Request){

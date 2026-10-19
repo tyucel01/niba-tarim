@@ -51,7 +51,8 @@ if(oldAdmins===undefined)delete process.env.ADMIN_EMAILS;else process.env.ADMIN_
 assert.equal(g.verifyQuery({...p,installment_count:3,payment_system:'Bank A'},query({...sale,installmentCount:2,paymentSystem:'Bank A'})).status,'review');
 assert.equal(g.verifyQuery({...p,installment_count:3,payment_system:'Bank A'},query({...sale,installmentCount:3,paymentSystem:'Bank A'})).status,'paid');
 assert.equal(ledger.paratikaLedgerAccount('10013929',{PARASUT_ACCOUNT_ID:'existing'}),'existing');
-assert.equal(ledger.paratikaLedgerAccount('10013922',{PARASUT_ACCOUNT_ID:'existing'}),undefined);
+assert.equal(ledger.paratikaLedgerAccount('10013922',{PARASUT_ACCOUNT_ID:'existing'}),'existing');
+assert.equal(ledger.paratikaLedgerAccount('99999999',{PARASUT_ACCOUNT_ID:'existing'}),undefined);
 assert.equal(ledger.paratikaLedgerAccount('10013929',{PARASUT_ACCOUNT_ID:'existing',PARATIKA_10013929_PARASUT_ACCOUNT_ID:'override'}),'override');
 assert.equal(g.requireSessionToken({responseCode:'00',sessionToken:'A'.repeat(48)}),'A'.repeat(48));
 assert.throws(()=>g.requireSessionToken({responseCode:'99',errorCode:'ERR10010',errorMsg:'missing CUSTOMEREMAIL secret-example'}),e=>e.rejected&&e.message.includes('ERR10010')&&e.message.includes('CUSTOMEREMAIL')&&!e.message.includes('secret-example'));
