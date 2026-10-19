@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ParatikaTahsilat from "./paratika-tahsilat";
 
 type Contact = {
   id: string;
@@ -294,6 +295,7 @@ export default function KartCekimleriPage() {
           </div>
         </div>
 
+        <ParatikaTahsilat contacts={contacts} onLedgerPosted={()=>void loadTransactions()}/>
         <div className="grid gap-6 xl:grid-cols-[1fr_430px]">
           <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm md:p-7">
             <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-center">

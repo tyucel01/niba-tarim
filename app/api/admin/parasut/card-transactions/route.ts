@@ -1,3 +1,4 @@
+import { cardLedgerToken as getParasutToken, createCardLedgerTransaction as createParasutContactTransaction } from "@/lib/parasut/card-ledger";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -7,87 +8,6 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
-
-async function getParasutToken() {
-  const response = await fetch(`${BASE_URL}/oauth/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      grant_type: "password",
-      client_id: process.env.PARASUT_CLIENT_ID,
-      client_secret: process.env.PARASUT_CLIENT_SECRET,
-      username: process.env.PARASUT_USERNAME,
-      password: process.env.PARASUT_PASSWORD,
-      redirect_uri: "urn:ietf:wg:oauth:2.0:oob",
-    }),
-    cache: "no-store",
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(JSON.stringify(data));
-  }
-
-  return data.access_token as string;
-}
-
-async function createParasutContactTransaction(params: {
-  contactId: string;
-  transactionType: "payment" | "collection";
-  date: string;
-  amount: number;
-  description?: string;
-}) {
-  const companyId = process.env.PARASUT_COMPANY_ID;
-  const accountId = process.env.PARASUT_ACCOUNT_ID;
-
-  if (!companyId) throw new Error("PARASUT_COMPANY_ID eksik");
-  if (!accountId) throw new Error("PARASUT_ACCOUNT_ID eksik");
-
-  const token = await getParasutToken();
-
-  const endpoint =
-    params.transactionType === "payment"
-      ? `contact_debit_transactions`
-      : `contact_credit_transactions`;
-
-  const response = await fetch(
-    `${BASE_URL}/v4/${companyId}/contacts/${params.contactId}/${endpoint}`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        data: {
-          type: "transactions",
-          attributes: {
-            description: params.description || "Kart çekimi",
-            account_id: Number(accountId),
-            date: params.date,
-            amount: Number(params.amount),
-          },
-        },
-      }),
-      cache: "no-store",
-    }
-  );
-
-  const json = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      JSON.stringify({
-        message: "Paraşüt cari hareketi oluşturulamadı",
-        detail: json,
-      })
-    );
-  }
-
-  return json;
-}
 
 async function deleteParasutTransaction(transactionId: string) {
   const companyId = process.env.PARASUT_COMPANY_ID;
@@ -225,6 +145,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ ok: false, error: findError.message }, { status: 500 });
     }
 
+    if (existing?.pos_payment_id) return NextResponse.json({ok:false,error:"Paratika tahsilatı bu ekrandan silinemez. Banka iptal/iade ve Paraşüt mutabakatını birlikte kontrol edin."},{status:409});
     if (existing?.parasut_transaction_id) {
       await deleteParasutTransaction(existing.parasut_transaction_id);
     }
