@@ -40,8 +40,9 @@ export function checkoutUrl(payment: Pick<PosPayment,"mode"|"session_token">) {
   if (!payment.session_token || !/^[A-Za-z0-9]{20,64}$/.test(payment.session_token)) throw new Error("Ödeme oturumu doğrulanamadı.");
   return `${payment.mode === "live" ? "https://vpos.paratika.com.tr" : "https://entegrasyon.paratika.com.tr"}/paratika/api/v2/post/sale3d/${payment.session_token}`;
 }
-export async function posRequest(action: "SESSIONTOKEN" | "QUERYTRANSACTION" | "QUERYINSTALLMENT", params: Record<string,string>, request = fetch, merchant?: string) {
-  const config = posConfig(process.env,merchant);
+export async function posRequest(action: "SESSIONTOKEN" | "QUERYTRANSACTION" | "QUERYINSTALLMENT", params: Record<string,string>, request = fetch, merchant?: string, mode?: "test"|"live") {
+  if(mode && action==='SESSIONTOKEN')throw new Error("Tahsilat için ortam değiştirilemez.");
+  const config = posConfig(mode?{...process.env,PARATIKA_MODE:mode}:process.env,merchant);
   if (!config.configured) throw new Error("Paratika API kullanıcı ayarları eksik.");
   if (action === "SESSIONTOKEN" && !config.enabled) throw new Error("Sanal POS tahsilatı henüz etkinleştirilmedi.");
   let response: Response;
