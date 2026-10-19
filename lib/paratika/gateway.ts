@@ -56,12 +56,14 @@ export async function posRequest(action: "SESSIONTOKEN" | "QUERYTRANSACTION" | "
   if (!response.ok || !data || typeof data !== "object") throw new Error("Paratika servisi geçici olarak yanıt vermiyor.");
   return data;
 }
+// Provider examples pre-encode structured fields, then form-encode the request.
+export function providerJson(value:unknown){return encodeURIComponent(JSON.stringify(value));}
 export function sessionParams(payment: PosPayment, callbackState: string, origin: string) {
   return {SESSIONTYPE:"PAYMENTSESSION",SESSIONEXPIRY:"1h",LANGUAGE:"tr",MERCHANTPAYMENTID:payment.merchant_payment_id,
     AMOUNT:money(Number(payment.amount_minor)),CURRENCY:"TRY",CUSTOMER:payment.customer_id,CUSTOMERNAME:payment.customer_name,
     ...(payment.customer_email?{CUSTOMEREMAIL:payment.customer_email}:{}),RETURNURL:`${origin}/api/payments/paratika/callback?state=${encodeURIComponent(callbackState)}`,
-    EXTRA:JSON.stringify({IGNORECUSTOMERCOMMISSION:"YES",AlwaysSaveCard:"false"}),
-    ORDERITEMS:JSON.stringify([{productCode:"NIBA-TAHSILAT",name:"Niba Tarım Tahsilatı",quantity:1,amount:Number(payment.amount_minor)/100}]),
+    EXTRA:providerJson({IGNORECUSTOMERCOMMISSION:"YES",AlwaysSaveCard:"false"}),
+    ORDERITEMS:providerJson([{code:"NIBA"+digest(payment.merchant_payment_id).slice(0,20),name:"Niba Tarım Tahsilatı",description:"Cari hesap tahsilatı",quantity:"1",amount:money(Number(payment.amount_minor))}]),
   };
 }
 export type VerifiedResult = {status: "pending"|"paid"|"failed"|"review"; transactionId?: string; paidDate?: string; reason: string};

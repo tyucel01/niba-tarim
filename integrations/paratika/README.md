@@ -44,3 +44,7 @@ Resmi kaynaklar: https://vpos.paratika.com.tr/paratika/api/v2/doc?language=tr ve
 ## Onaylanan Paraşüt hesap eşlemesi
 
 10013929 Tarım POS için mevcut Kart Çekimleri hesabının (`PARASUT_ACCOUNT_ID`) kullanılması kullanıcı tarafından onaylandı. Özel `PARATIKA_10013929_PARASUT_ACCOUNT_ID` yoksa yalnız bu hesapta mevcut hesaba kayıt atılır. 10013922 Normal POS için bu geri dönüş yoktur. Müşteri carisi her işlemde seçilen cari kimliğidir; Paraşüt hesabı cari seçiminden farklıdır.
+
+## Yapısal alan kodlaması
+
+ORDERITEMS ve EXTRA, resmî PHP Direct Post örneğindeki gibi önce JSON ve URL kodlamasıyla hazırlanır; ardından tüm istek application/x-www-form-urlencoded olarak kodlanır. Ürün satırı code, name, description, quantity ve amount içerir. Referans: https://github.com/PaytenASEE/paratika-samples/blob/master/paratikaphp/src/paratikasamples/php/session/sessiontoken.php
