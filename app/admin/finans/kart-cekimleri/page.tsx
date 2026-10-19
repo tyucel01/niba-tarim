@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ParatikaTahsilat from "./paratika-tahsilat";
+import {usePanelDialog} from "@/app/admin/ui/panel-dialog";
 
 type Contact = {
   id: string;
@@ -25,10 +26,11 @@ type CardTransaction = {
   status: string;
   error_message: string | null;
   created_at: string;
+  pos_payment_id?: string | null;
 };
 
 const CONTACTS_CACHE_KEY = "parasut_contacts_cache_v1";
-const CONTACTS_CACHE_TTL = 30 * 60 * 1000;
+// Contacts stay cached until the user explicitly refreshes them.
 
 function normalizeText(value: string) {
   return value
@@ -43,6 +45,14 @@ function normalizeText(value: string) {
 }
 
 export default function KartCekimleriPage() {
+  const {panelConfirm}=usePanelDialog();
+  const [tab,setTab]=useState<'collect'|'manual'|'history'>('collect');
+  const [feedback,setFeedback]=useState<{text:string;tone:'error'|'success'}|null>(null);
+  const [historySearch,setHistorySearch]=useState('');
+  const [historySource,setHistorySource]=useState('all');
+  function notify(text:string){setFeedback({text,tone:'error'});}
+  const contactsRequest=useRef<Promise<void>|null>(null);
+  const [contactsUpdatedAt,setContactsUpdatedAt]=useState<number|null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [transactions, setTransactions] = useState<CardTransaction[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(false);
@@ -72,9 +82,9 @@ export default function KartCekimleriPage() {
         `${item.name || ""} ${item.taxNumber || ""} ${item.city || ""}`
       );
 
-      return haystack.includes(q);
+      return item.id===selectedContactId||haystack.includes(q);
     });
-  }, [contacts, search]);
+  }, [contacts, search, selectedContactId]);
 
   const totals = useMemo(() => {
     const payment = transactions
@@ -88,17 +98,20 @@ export default function KartCekimleriPage() {
     return { payment, collection, count: transactions.length };
   }, [transactions]);
 
+  const visibleTransactions=useMemo(()=>transactions.filter(item=>{
+    const match=normalizeText(`${item.company_name} ${item.description||''} ${item.payment_channel||''}`).includes(normalizeText(historySearch.trim()));
+    return match&&(historySource==='all'||(historySource==='pos'?!!item.pos_payment_id:!item.pos_payment_id));
+  }),[transactions,historySearch,historySource]);
+
   function getCachedContacts() {
     try {
       const raw = localStorage.getItem(CONTACTS_CACHE_KEY);
       if (!raw) return null;
 
       const parsed = JSON.parse(raw);
-      const isExpired = Date.now() - parsed.createdAt > CONTACTS_CACHE_TTL;
-
-      if (isExpired) return null;
       if (!Array.isArray(parsed.contacts)) return null;
 
+      setContactsUpdatedAt(typeof parsed.createdAt==='number'?parsed.createdAt:null);
       return parsed.contacts as Contact[];
     } catch {
       return null;
@@ -106,11 +119,12 @@ export default function KartCekimleriPage() {
   }
 
   function setCachedContacts(nextContacts: Contact[]) {
+    const updatedAt=Date.now();setContactsUpdatedAt(updatedAt);
     try {
       localStorage.setItem(
         CONTACTS_CACHE_KEY,
         JSON.stringify({
-          createdAt: Date.now(),
+          createdAt: updatedAt,
           contacts: nextContacts,
         })
       );
@@ -120,23 +134,25 @@ export default function KartCekimleriPage() {
   async function loadContacts(forceRefresh = false) {
     if (!forceRefresh) {
       const cached = getCachedContacts();
-      if (cached && cached.length > 0) {
+      if (cached) {
         setContacts(cached);
         return;
       }
     }
 
+    if(contactsRequest.current)return contactsRequest.current;
+    const request=async()=>{
     setLoadingContacts(true);
 
     try {
-      const response = await fetch("/api/admin/parasut/contacts", {
+      const response = await fetch(`/api/admin/parasut/contacts${forceRefresh?'?refresh=1':''}`, {
         cache: "no-store",
       });
 
       const data = await response.json();
 
       if (!data.ok) {
-        alert(data.error || "Paraşüt carileri alınamadı");
+        notify(data.error || "Paraşüt carileri alınamadı");
         return;
       }
 
@@ -144,10 +160,13 @@ export default function KartCekimleriPage() {
       setContacts(nextContacts);
       setCachedContacts(nextContacts);
     } catch {
-      alert("Paraşüt carileri alınırken hata oluştu");
+      notify("Paraşüt carileri alınırken hata oluştu");
     } finally {
       setLoadingContacts(false);
     }
+    };
+    contactsRequest.current=request();
+    try{await contactsRequest.current;}finally{contactsRequest.current=null;}
   }
 
   async function loadTransactions() {
@@ -161,7 +180,7 @@ export default function KartCekimleriPage() {
       const data = await response.json();
 
       if (!data.ok) {
-        alert(
+        notify(
           `${data.error || "Kayıt oluşturulamadı"}\n\nDetay:\n${
             typeof data.detail === "string"
               ? data.detail
@@ -173,7 +192,7 @@ export default function KartCekimleriPage() {
 
       setTransactions(data.transactions || []);
     } catch {
-      alert("Kart çekimleri alınırken hata oluştu");
+      notify("Kart çekimleri alınırken hata oluştu");
     } finally {
       setLoadingTransactions(false);
     }
@@ -191,14 +210,14 @@ export default function KartCekimleriPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!selectedContactId) return alert("Lütfen cari seçin");
-    if (!amount || Number(amount) <= 0) return alert("Lütfen geçerli tutar girin");
+    if (!selectedContactId) return notify("Lütfen cari seçin");
+    if (!amount || Number(amount) <= 0) return notify("Lütfen geçerli tutar girin");
 
     const confirmText =
       `${selectedContact?.name || "Seçili cari"} için ${Number(amount).toLocaleString("tr-TR")} TL ` +
       `${transactionType === "payment" ? "ödeme" : "tahsilat"} kaydı oluşturulacak. Onaylıyor musunuz?`;
 
-    if (!confirm(confirmText)) return;
+    if (!await panelConfirm(confirmText)) return;
 
     setSaving(true);
 
@@ -221,7 +240,7 @@ export default function KartCekimleriPage() {
       const data = await response.json();
 
       if (!data.ok) {
-        alert(
+        notify(
           `${data.error || "Kayıt oluşturulamadı"}\n\nDetay:\n${
             typeof data.detail === "string"
               ? data.detail
@@ -238,16 +257,17 @@ export default function KartCekimleriPage() {
       setSearch("");
 
       await loadTransactions();
-      alert("Kart çekimi kaydedildi");
+      setFeedback({text:"Kayıt Paraşüt’e işlendi. Karttan yeni bir çekim yapılmadı.",tone:"success"});
+      setTab("history");
     } catch {
-      alert("Kayıt sırasında hata oluştu");
+      notify("Kayıt sırasında hata oluştu");
     } finally {
       setSaving(false);
     }
   }
 
   async function handleDelete(id: string, companyName: string) {
-    if (!confirm(`${companyName || "Bu kayıt"} silinsin mi?`)) return;
+    if (!await panelConfirm(`${companyName || "Bu kayıt"} silinsin mi? Paraşüt’e işlenen cari hareketi de silinecek.`)) return;
 
     setDeletingId(id);
 
@@ -259,13 +279,13 @@ export default function KartCekimleriPage() {
       const data = await response.json();
 
       if (!data.ok) {
-        alert(data.error || "Kayıt silinemedi");
+        notify(data.error || "Kayıt silinemedi");
         return;
       }
 
       await loadTransactions();
     } catch {
-      alert("Silme sırasında hata oluştu");
+      notify("Silme sırasında hata oluştu");
     } finally {
       setDeletingId(null);
     }
@@ -274,45 +294,30 @@ export default function KartCekimleriPage() {
   return (
     <main className="min-h-screen bg-[#f5f7f4] px-4 py-6 text-slate-900 md:px-8">
       <div className="mx-auto max-w-7xl">
-        <div className="mb-6 overflow-hidden rounded-[32px] border border-emerald-900/10 bg-gradient-to-br from-emerald-950 via-emerald-900 to-slate-950 p-7 text-white shadow-xl">
-          <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
-            <div>
-              <p className="text-sm font-semibold text-emerald-200">Niba Admin / Finans</p>
-              <h1 className="mt-2 text-3xl font-black tracking-tight md:text-4xl">
-                Kart Çekimleri
-              </h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-emerald-50/80">
-                Tedarikçiye yapılan kart ödemelerini ve müşterilerden alınan kart tahsilatlarını tek ekrandan kaydedin.
-                Yanlış girilen kayıtları alttaki listeden silebilirsiniz.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              <Stat title="Kayıt" value={String(totals.count)} />
-              <Stat title="Ödeme" value={`${totals.payment.toLocaleString("tr-TR")} ₺`} />
-              <Stat title="Tahsilat" value={`${totals.collection.toLocaleString("tr-TR")} ₺`} />
-            </div>
-          </div>
+        <header className="mb-5 flex flex-col justify-between gap-5 rounded-3xl border border-slate-200 bg-white p-5 md:flex-row md:items-center md:p-7">
+          <div><p className="text-xs font-bold uppercase tracking-widest text-emerald-700">Finans</p><h1 className="mt-1 text-3xl font-black tracking-tight">Kart Çekimleri</h1><p className="mt-2 text-sm text-slate-500">Karttan tahsilat alın, dışarıda yapılan çekimi kaydedin veya geçmişi inceleyin.</p></div>
+          <button type="button" disabled={loadingContacts} onClick={()=>loadContacts(true)} className="shrink-0 rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold hover:bg-slate-50 disabled:opacity-50">{loadingContacts?'Cariler yenileniyor…':'Paraşüt carilerini yenile'}</button>
+        </header>
+        <p className="mb-4 px-1 text-xs text-slate-500">{contacts.length} cari kayıtlı{contactsUpdatedAt?` · Son güncelleme: ${new Date(contactsUpdatedAt).toLocaleString('tr-TR')}`:''} · Arama kayıtlı listede yapılır. Yeni cari eklediyseniz yukarıdan yenileyin.</p>
+        <nav aria-label="Kart işlemleri" className="mb-5 grid gap-2 rounded-2xl bg-slate-200/60 p-2 md:grid-cols-3">
+          {([{id:'collect',title:'Karttan Tahsilat',description:'Sanal POS ile yeni çekim'},{id:'manual',title:'Paraşüt’e Kayıt',description:'Dışarıda yapılan çekimi işle'},{id:'history',title:'İşlem Geçmişi',description:'POS sonuçları ve cari kayıtlar'}] as const).map(item=><button key={item.id} type="button" aria-current={tab===item.id?'page':undefined} aria-controls={`card-panel-${item.id}`} onClick={()=>setTab(item.id)} className={`rounded-xl px-4 py-3 text-left transition ${tab===item.id?'bg-white text-emerald-900 shadow-sm ring-1 ring-slate-900/5':'text-slate-600 hover:bg-white/60'}`}><span className="block text-sm font-extrabold">{item.title}</span><span className="mt-0.5 block text-xs opacity-75">{item.description}</span></button>)}
+        </nav>
+        {feedback&&<div role={feedback.tone==='error'?'alert':'status'} className={`mb-5 flex items-start justify-between gap-4 whitespace-pre-wrap rounded-xl border p-4 text-sm ${feedback.tone==='error'?'border-red-200 bg-red-50 text-red-800':'border-emerald-200 bg-emerald-50 text-emerald-800'}`}><span>{feedback.text}</span><button type="button" aria-label="Bildirimi kapat" onClick={()=>setFeedback(null)} className="font-bold">×</button></div>}
+        <div hidden={tab==='manual'} id={tab==='history'?'card-panel-history':'card-panel-collect'}>
+          <ParatikaTahsilat contacts={contacts} view={tab==='history'?'history':'collect'} onLedgerPosted={()=>void loadTransactions()}/>
         </div>
-
-        <ParatikaTahsilat contacts={contacts} onLedgerPosted={()=>void loadTransactions()}/>
+        <div id="card-panel-manual" hidden={tab!=='manual'}>
         <div className="grid gap-6 xl:grid-cols-[1fr_430px]">
           <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm md:p-7">
             <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-center">
               <div>
-                <h2 className="text-xl font-bold">Yeni İşlem Girişi</h2>
+                <h2 className="text-xl font-bold">Mevcut çekimi Paraşüt’e kaydet</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Paraşüt carisini seçin ve kart çekimini kaydedin.
+                  Banka veya başka bir POS üzerinden yaptığınız işlemi cariye kaydedin. Bu form karttan para çekmez.
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => loadContacts(true)}
-                className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50"
-              >
-                {loadingContacts ? "Cariler yükleniyor..." : "Carileri Yenile"}
-              </button>
+
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
@@ -407,12 +412,12 @@ export default function KartCekimleriPage() {
                 disabled={saving}
                 className="w-full rounded-2xl bg-emerald-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {saving ? "Kaydediliyor..." : "Kart Çekimini Kaydet"}
+                {saving ? "Kaydediliyor..." : "Paraşüt’e kaydet"}
               </button>
             </form>
           </section>
 
-          <aside className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+          <aside className="self-start xl:sticky xl:top-6 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-black">İşlem Önizleme</h2>
             <p className="mt-1 text-sm text-slate-500">Kaydetmeden önce son kontrol.</p>
 
@@ -435,17 +440,18 @@ export default function KartCekimleriPage() {
             </div>
 
             <div className="mt-5 rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-              Yanlış kayıt girilirse alttaki listeden silebilirsiniz. Paraşüt’e işlenen kayıtlarda silme işlemi Paraşüt kaydını da silmeye çalışır.
+              Bu işlem yalnız cari hareketi oluşturur. Panelden alınan POS tahsilatları otomatik işlenir; aynı tahsilatı bu formdan tekrar kaydetmeyin.
             </div>
           </aside>
         </div>
 
-        <section className="mt-7 rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm md:p-7">
+        </div>
+        <section hidden={tab!=="history"} className="mt-5 rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm md:p-7">
           <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row md:items-center">
             <div>
-              <h2 className="text-xl font-black">İşlenen Kayıtlar</h2>
+              <h2 className="text-xl font-black">Paraşüt Kayıtları</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Son 100 kart çekimi listelenir.
+                Son 100 kayıt gösterilir. POS tahsilatları ve manuel kayıtlar bu listede birlikte yer alır.
               </p>
             </div>
 
@@ -458,6 +464,9 @@ export default function KartCekimleriPage() {
             </button>
           </div>
 
+          <div className="mb-5 grid gap-3 sm:grid-cols-3"><Summary title="Yüklenen kayıt" value={String(totals.count)}/><Summary title="Tahsilat toplamı" value={`${totals.collection.toLocaleString('tr-TR')} ₺`}/><Summary title="Ödeme toplamı" value={`${totals.payment.toLocaleString('tr-TR')} ₺`}/></div>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row"><input aria-label="Geçmiş kayıtlarda ara" value={historySearch} onChange={e=>setHistorySearch(e.target.value)} placeholder="Cari, açıklama veya banka ara…" className="input flex-1"/><select aria-label="Kayıt kaynağı" value={historySource} onChange={e=>setHistorySource(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm"><option value="all">Tüm kayıtlar</option><option value="pos">Panelden POS tahsilatı</option><option value="manual">Manuel Paraşüt kaydı</option></select></div>
+          <p className="mb-3 text-xs text-slate-500">{visibleTransactions.length} kayıt</p>
           <div className="overflow-x-auto rounded-3xl border border-slate-200">
             <table className="w-full min-w-[980px] border-separate border-spacing-0 text-sm">
               <thead>
@@ -475,14 +484,14 @@ export default function KartCekimleriPage() {
               </thead>
 
               <tbody>
-                {transactions.length === 0 ? (
+                {visibleTransactions.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
-                      Henüz kayıt yok.
+                      Bu filtrelere uygun kayıt bulunamadı.
                     </td>
                   </tr>
                 ) : (
-                  transactions.map((item) => (
+                  visibleTransactions.map((item) => (
                     <tr key={item.id} className="border-t border-slate-100 hover:bg-slate-50">
                       <td className="border-t border-slate-100 px-4 py-4">
                         {item.transaction_date}
@@ -500,25 +509,25 @@ export default function KartCekimleriPage() {
                         {Number(item.amount || 0).toLocaleString("tr-TR")} TL
                       </td>
                       <td className="border-t border-slate-100 px-4 py-4">
-                        {item.payment_channel || "-"}
+                        <span className="block">{item.payment_channel || "-"}</span><span className="text-xs text-slate-500">{item.pos_payment_id?"Panelden POS":"Manuel kayıt"}</span>
                       </td>
                       <td className="border-t border-slate-100 px-4 py-4">
                         <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
-                          {item.status}
+                          {item.status==="parasut_processed"?"Paraşüt’e işlendi":item.status==="error"?"Kontrol gerekli":item.status}
                         </span>
                       </td>
                       <td className="border-t border-slate-100 px-4 py-4">
                         {item.description || "-"}
                       </td>
                       <td className="border-t border-slate-100 px-4 py-4 text-right">
-                        <button
+                        {item.pos_payment_id?<span className="text-xs text-slate-400">POS kaydı</span>:<button
                           type="button"
                           disabled={deletingId === item.id}
                           onClick={() => handleDelete(item.id, item.company_name)}
                           className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700 hover:bg-red-100 disabled:opacity-50"
                         >
                           {deletingId === item.id ? "Siliniyor..." : "Sil"}
-                        </button>
+                        </button>}
                       </td>
                     </tr>
                   ))
@@ -550,11 +559,11 @@ export default function KartCekimleriPage() {
   );
 }
 
-function Stat({ title, value }: { title: string; value: string }) {
+function Summary({ title, value }: { title: string; value: string }) {
   return (
-    <div className="min-w-[110px] rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-      <div className="text-xs font-semibold text-emerald-100/80">{title}</div>
-      <div className="mt-1 text-sm font-black text-white">{value}</div>
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <div className="text-xs font-semibold text-slate-500">{title}</div>
+      <div className="mt-1 text-lg font-black text-slate-900">{value}</div>
     </div>
   );
 }
