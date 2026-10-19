@@ -3,6 +3,7 @@ begin;
 create table public.paratika_payments (
  id uuid primary key default gen_random_uuid(), idempotency_key uuid not null unique,
  merchant_payment_id text not null unique, merchant text not null, mode text not null check(mode in('test','live')),
+ installment_count integer not null default 1 check(installment_count between 1 and 36), payment_system text not null default '',
  customer_id text not null, customer_name text not null, customer_email text not null, description text not null default '',
  amount_minor bigint not null check(amount_minor between 1 and 100000000000), currency text not null default 'TRY' check(currency='TRY'),
  status text not null default 'creating' check(status in('creating','ready','pending','paid','failed','review')),
@@ -17,16 +18,16 @@ alter table public.paratika_payments enable row level security;
 revoke all on public.paratika_payments from public,anon,authenticated;
 grant select,insert,update on public.paratika_payments to service_role;
 alter table public.parasut_card_transactions add column pos_payment_id uuid unique references public.paratika_payments(id);
-create function public.reserve_paratika_payment(p_key uuid,p_customer text,p_name text,p_email text,p_minor bigint,p_mode text,p_merchant text,p_hash text,p_creator uuid,p_description text) returns jsonb
+create function public.reserve_paratika_payment(p_key uuid,p_customer text,p_name text,p_email text,p_minor bigint,p_mode text,p_merchant text,p_hash text,p_creator uuid,p_description text,p_installments integer,p_system text) returns jsonb
 language plpgsql security invoker set search_path='' as $$
 declare existing public.paratika_payments%rowtype; inserted boolean;
 begin
- insert into public.paratika_payments(idempotency_key,merchant_payment_id,merchant,mode,customer_id,customer_name,customer_email,amount_minor,callback_hash,created_by,description)
- values(p_key,'NIBA-'||p_key::text,p_merchant,p_mode,p_customer,p_name,p_email,p_minor,p_hash,p_creator,p_description)
+ insert into public.paratika_payments(idempotency_key,merchant_payment_id,merchant,mode,customer_id,customer_name,customer_email,amount_minor,callback_hash,created_by,description,installment_count,payment_system)
+ values(p_key,'NIBA-'||p_key::text,p_merchant,p_mode,p_customer,p_name,p_email,p_minor,p_hash,p_creator,p_description,p_installments,p_system)
  on conflict(idempotency_key) do nothing returning * into existing;
  inserted:=found;
  if not inserted then select * into existing from public.paratika_payments where idempotency_key=p_key for update; end if;
- if existing.customer_id is distinct from p_customer or existing.customer_name is distinct from p_name or existing.customer_email is distinct from p_email or existing.amount_minor is distinct from p_minor or existing.mode is distinct from p_mode or existing.merchant is distinct from p_merchant or existing.created_by is distinct from p_creator or existing.description is distinct from p_description then raise exception 'Aynı işlem anahtarı farklı tahsilat bilgileriyle kullanılamaz.'; end if;
+ if existing.customer_id is distinct from p_customer or existing.customer_name is distinct from p_name or existing.customer_email is distinct from p_email or existing.amount_minor is distinct from p_minor or existing.mode is distinct from p_mode or existing.merchant is distinct from p_merchant or existing.created_by is distinct from p_creator or existing.description is distinct from p_description or existing.installment_count is distinct from p_installments or existing.payment_system is distinct from p_system then raise exception 'Aynı işlem anahtarı farklı tahsilat bilgileriyle kullanılamaz.'; end if;
  return jsonb_build_object('created',inserted,'payment',to_jsonb(existing));
 end $$;
 create function public.record_paratika_check(p_id uuid,p_status text,p_transaction text,p_note text,p_paid_date date) returns jsonb
@@ -61,6 +62,6 @@ begin
  values('customer','collection',item.customer_id,item.customer_name,item.paid_date,item.amount_minor::numeric/100,'Paratika '||item.merchant_payment_id,'Paratika Sanal POS','parasut_processed',p_transaction,jsonb_build_object('source','paratika','payment_id',item.merchant_payment_id),item.id);
  update public.paratika_payments set parasut_state='posted',parasut_transaction_id=p_transaction where id=p_id;
 end $$;
-revoke execute on function public.reserve_paratika_payment(uuid,text,text,text,bigint,text,text,text,uuid,text),public.record_paratika_check(uuid,text,text,text,date),public.claim_paratika_ledger(uuid),public.finish_paratika_ledger(uuid,text) from public,anon,authenticated;
-grant execute on function public.reserve_paratika_payment(uuid,text,text,text,bigint,text,text,text,uuid,text),public.record_paratika_check(uuid,text,text,text,date),public.claim_paratika_ledger(uuid),public.finish_paratika_ledger(uuid,text) to service_role;
+revoke execute on function public.reserve_paratika_payment(uuid,text,text,text,bigint,text,text,text,uuid,text,integer,text),public.record_paratika_check(uuid,text,text,text,date),public.claim_paratika_ledger(uuid),public.finish_paratika_ledger(uuid,text) from public,anon,authenticated;
+grant execute on function public.reserve_paratika_payment(uuid,text,text,text,bigint,text,text,text,uuid,text,integer,text),public.record_paratika_check(uuid,text,text,text,date),public.claim_paratika_ledger(uuid),public.finish_paratika_ledger(uuid,text) to service_role;
 commit;

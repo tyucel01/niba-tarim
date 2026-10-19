@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import { posAdmin,posAuth,paymentInput,createPayment,publicPayment,reconcilePayment } from '@/lib/paratika/server';
-import {posConfig,type PosPayment} from '@/lib/paratika/gateway';
+import {posConfig,MERCHANTS,type PosPayment} from '@/lib/paratika/gateway';
 export const runtime='nodejs';export const dynamic='force-dynamic';export const maxDuration=120;
 const reply=(body:unknown,status=200)=>NextResponse.json(body,{status,headers:{'Cache-Control':'no-store'}});
 export async function GET(req:Request){
  const db=posAdmin(),auth=await posAuth(req,db);if(auth.error)return auth.error;
  try{const c=posConfig();const {data,error}=await db.from('paratika_payments').select('*').order('created_at',{ascending:false}).limit(30);
  if(error)return reply({error:'Sanal POS kayıtları hazır değil. Kurulum kontrol edilmeli.'},503);
- return reply({ok:true,configured:c.configured&&c.enabled,mode:c.mode,payments:(data||[]).map(p=>publicPayment(p as PosPayment))});}catch{return reply({error:'Sanal POS yapılandırması kontrol edilmeli.'},503);}
+ return reply({ok:true,configured:c.configured&&c.enabled,mode:c.mode,merchants:MERCHANTS.map(m=>({...m,configured:posConfig(process.env,m.id).configured&&posConfig(process.env,m.id).enabled})),payments:(data||[]).map(p=>publicPayment(p as PosPayment))});}catch{return reply({error:'Sanal POS yapılandırması kontrol edilmeli.'},503);}
 }
 export async function POST(req:Request){
  const db=posAdmin(),auth=await posAuth(req,db);if(auth.error)return auth.error;

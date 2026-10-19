@@ -9,22 +9,25 @@ Kod hazır; gerçek tahsilat yapılmadı, veritabanı kurulumu ve canlı yayın 
 1. Niba veritabanında `setup.sql` dosyasını bir kez uygulayın. Başka Supabase projesine uygulamayın. Mevcut manuel kayıtlar korunur.
 2. Ortam ayarlarını güvenli yayın ayarlarına girin. Parola ve anahtarları koda veya sohbete yazmayın.
 3. Test ortamında başarılı/başarısız ödeme, sekmenin kapanması, tekrarlanan dönüş ve Paraşüt bağlantı kesintisi senaryolarını kontrol edin. Test ödemeleri Paraşüt'e aktarılmaz.
-4. Paratika hesabında barındırılan ödeme sayfasının 3D Secure ayarını ve dönüş adresini sağlayıcıyla doğrulayın. Uygulama kart bilgisi toplamaz.
+4. Paratika hesabında Direct Post 3D yetkisini ve dönüş adresini sağlayıcıyla doğrulayın. Kart bilgileri panelde girilir ve doğrudan Paratika’ya gönderilir; Niba sunucusu kart bilgisi almaz.
 5. Canlı geçişte ayrı onayla canlı modu ve iki etkinleştirme ayarını açın.
 
-## Ortam ayarları
+## İki üye iş yeri ve ayarlar
 
-- `PARATIKA_MODE=test` (canlı için `live`)
-- `PARATIKA_MERCHANT`: ilgili ortamın üye iş yeri numarası; canlı hesap için 10013929 bilgisi verildi, sağlayıcıyla teyit edilmeli.
-- `PARATIKA_MERCHANT_USER`, `PARATIKA_MERCHANT_PASSWORD`: ilgili ortam API kullanıcısı.
-- `PARATIKA_PUBLIC_ORIGIN=https://www.nibatarim.com`
-- `PARATIKA_ENABLED=false`: testte hazırlık sonrası true.
-- `PARATIKA_LIVE_ENABLED=false`: canlı ödeme için ayrıca true gerekir.
-- `PARATIKA_PARASUT_ACCOUNT_ID`: Paraşüt'te Paratika bloke tahsilatlarını izleyecek hesabın kimliği. Canlı ödeme başlatmak için zorunlu. Mevcut manuel form `PARASUT_ACCOUNT_ID` kullanmayı sürdürür.
-- Mevcut Paraşüt, Supabase ve yönetici izin ayarları korunur.
-- `CRON_SECRET`: en az 32 karakter, güvenli zamanlayıcı çağrısı için.
+- 10013929: Tarım POS
+- 10013922: Normal POS
 
-Dönüş adresi `/api/payments/paratika/callback?state=...` şeklinde işlem başına rastgele oluşturulur. Gelen başarı bildirimi tek başına yeterli sayılmaz; sunucu QUERYTRANSACTION ile tutar, cari, para birimi, referans, banka işlem kimliği ve tarihini doğrular.
+`settings.env.example` güvenli ayar isimlerini içerir. API bilgileri test/canlı ve üye iş yeri başına ayrı tutulur; başka hesaba otomatik geri dönüş yoktur. Canlı tahsilat için ayrıca iki etkinleştirme ayarı açılmalıdır. İki hesabın API bilgileri henüz eklenmedi.
+
+Kart formu panel içinde, analiz kodu yüklemeyen ayrı bir belge olarak açılır. Kart numarası/CVV doğrudan Paratika Direct Post 3D adresine gönderilir. Niba API'sine tam kart veya CVV kabul edilmez. Taksit sorgusuna yalnız ilk 8 hane gönderilir; saklanmaz. E-posta kullanıcıdan istenmez; Paratika müşteri bilgilendirme ayarı e-posta gerektiriyorsa canlı geçişten önce sağlayıcıyla çözülmelidir.
+
+Taksit seçenekleri QUERYINSTALLMENT ile seçilen hesap ve kart ön eki için alınır; ödeme oturumu açılırken sunucuda tekrar doğrulanır. SESSIONTOKEN'da ALLOWEDINSTALLMENTS ve IGNORECUSTOMERCOMMISSION=YES kullanılır. Böylece tahsilat miktarı müşteriye komisyon eklenmeden oluşturulur. Sağlayıcı kabulü test edilmeden bu davranış canlıda doğrulanmış sayılmaz.
+
+QUERYINSTALLMENT `customerCostCommissionRate` alanı Niba'nın komisyonu değildir. Niba komisyonu için `PARATIKA_VERIFIED_TARIFFS_JSON` içindeki sağlayıcı/sözleşme ile doğrulanmış, hesap+ortam+sistem+taksit bazlı oran kullanılır. Tanımsızsa oran ve net tutar gösterilmez. Bunlar yetkili sunucu ayarlarıdır; kullanıcı formdan değiştiremez. Hesaplanan net, mutabakat öncesi tahmindir.
+
+Tarım kartlarında bankaya özel vade/ürün parametreleri gerekebilir. Tarım POS API yetkileri ve ilgili kart için gereken alanlar test hesabı/sağlayıcı ile teyit edilmeden canlıya geçilmemelidir.
+
+Dönüş adresi `/api/payments/paratika/callback?state=...` şeklinde işlem başına rastgele oluşturulur. Gelen başarı bildirimi tek başına yeterli sayılmaz; sunucu QUERYTRANSACTION ile tutar, cari, para birimi, referans, banka işlem kimliği, tarih, taksit ve ödeme sistemini doğrular. Aynı işlem anahtarıyla ikinci kart gönderim adresi verilmez. Sonucu belirsiz işlem yeniden tahsilat başlatılmadan kontrol edilir.
 
 ## Sonuç kontrolü ve muhasebe
 

@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
-function load(file, fetch) {const exports = {};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports,require,process,URL,URLSearchParams,AbortSignal,fetch,Date,Intl});return exports;}
+function load(file, fetch, customRequire=require) {const exports = {};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports,require:customRequire,process,URL,URLSearchParams,AbortSignal,fetch,Date,Intl,Response});return exports;}
 (async()=>{
 const g=load('lib/paratika/gateway.ts');
 assert.equal(g.toMinor('26,50'),2650);assert.equal(g.money(2650),'26.50');
@@ -25,5 +25,30 @@ await ledger.createCardLedgerTransaction({contactId:'3',transactionType:'collect
 assert.match(calls[1].url,/contact_credit_transactions$/);assert.equal(calls[1].body.data.attributes.account_id,2);assert.equal(calls[1].body.data.attributes.amount,26.5);
 await ledger.createCardLedgerTransaction({contactId:'3',transactionType:'payment',date:'2026-10-19',amount:10,accountId:'4'});
 assert.match(calls[3].url,/contact_debit_transactions$/);assert.equal(calls[3].body.data.attributes.account_id,4);
+assert.equal(g.posConfig({PARATIKA_MODE:'live',PARATIKA_LIVE_10013929_USER:'a',PARATIKA_LIVE_10013929_PASSWORD:'b'},'10013922').configured,false);
+assert.equal(g.posConfig({PARATIKA_MODE:'live',PARATIKA_LIVE_10013922_USER:'a',PARATIKA_LIVE_10013922_PASSWORD:'b'},'10013922').configured,true);
+assert.throws(()=>g.posConfig({},'99999999'));
+const installments={responseCode:'00',paymentSystemList:[{name:'Bank A',installmentList:[{count:'NOT_ON_US',customerCostCommissionRate:99},{count:'3',customerCostCommissionRate:12},{count:'bad'}]}]};
+assert.equal(g.installmentOptions(installments,'10013929',{}).length,2);
+assert.equal(g.installmentOptions(installments,'10013929',{})[0].commissionRate,null);
+assert.equal(g.installmentOptions(installments,'10013929',{PARATIKA_VERIFIED_TARIFFS_JSON:JSON.stringify({'test:10013929:Bank A:3':4.5})})[1].commissionRate,4.5);
+const params=g.sessionParams({...p,amount_minor:2650,customer_name:'test',customer_email:'',installment_count:3},'x','https://www.nibatarim.com');
+assert.equal('CUSTOMEREMAIL' in params,false);assert.equal(params.ALLOWEDINSTALLMENTS,'3');assert.equal(JSON.parse(params.EXTRA).IGNORECUSTOMERCOMMISSION,'YES');
+const frame=load('app/odeme/kart-formu/route.ts');const html=await frame.GET().text();
+const script=html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)[1];new vm.Script(script);
+assert.ok(html.includes("form.target='_top'"));assert.ok(!html.includes('localStorage'));assert.ok(html.includes('connect-src')===false);
+const server=load('lib/paratika/server.ts',undefined,name=>name==='./gateway'?g:name==='@/lib/parasut/card-ledger'?ledger:require(name));
+const input={key:'22222222-2222-4222-8222-222222222222',merchant:'10013929',customerId:'123',customerName:'Örnek',amount:'26.50',installments:3,paymentSystem:'Bank A',bin:'54066712'};
+assert.equal(server.paymentInput(input).customerEmail,'');
+assert.throws(()=>server.paymentInput({...input,pan:'5406671234567890'}));
+assert.throws(()=>server.paymentInput({...input,cvv:'123'}));
+assert.throws(()=>server.paymentInput({...input,merchant:'99999999'}));
+assert.throws(()=>server.paymentInput({...input,bin:'5406671234567890'}));
+assert.equal((await server.posAuth(new Request('https://local'),{})).error.status,401);
+const oldAdmins=process.env.ADMIN_EMAILS;process.env.ADMIN_EMAILS='admin@example.com';
+assert.equal((await server.posAuth(new Request('https://local',{headers:{authorization:'Bearer mock'}}),{auth:{getUser:async()=>({data:{user:{email:'other@example.com'}}})}})).error.status,403);
+if(oldAdmins===undefined)delete process.env.ADMIN_EMAILS;else process.env.ADMIN_EMAILS=oldAdmins;
+assert.equal(g.verifyQuery({...p,installment_count:3,payment_system:'Bank A'},query({...sale,installmentCount:2,paymentSystem:'Bank A'})).status,'review');
+assert.equal(g.verifyQuery({...p,installment_count:3,payment_system:'Bank A'},query({...sale,installmentCount:3,paymentSystem:'Bank A'})).status,'paid');
 console.log('Paratika doğrulama ve mevcut Paraşüt kayıt yönleri: başarılı. Dış servise istek gönderilmedi.');
 })().catch(e=>{console.error(e);process.exitCode=1});
