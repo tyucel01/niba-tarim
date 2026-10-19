@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
-import { createCardLedgerTransaction } from "@/lib/parasut/card-ledger";
+import { createCardLedgerTransaction,paratikaLedgerAccount } from "@/lib/parasut/card-ledger";
 import { checkoutUrl,digest,posConfig,posRequest,sessionParams,toMinor,verifyQuery,installmentOptions,type PosPayment } from "./gateway";
 export function posAdmin() {return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.SUPABASE_SERVICE_ROLE_KEY!,{auth:{persistSession:false,autoRefreshToken:false}});}
 export type PosDb = ReturnType<typeof posAdmin>;
@@ -31,7 +31,7 @@ export function paymentInput(body:any){
 }
 export async function createPayment(db:PosDb,input:ReturnType<typeof paymentInput>,userId:string){
   const config=posConfig(process.env,input.merchant);if(!config.enabled||!config.configured)throw new Error('Paratika tahsilat ayarları tamamlanmadı veya tahsilat kapalı.');
-  if(config.mode==='live'&&!process.env[`PARATIKA_${input.merchant}_PARASUT_ACCOUNT_ID`])throw new Error('Paratika için Paraşüt bloke hesabı tanımlanmalı.');
+  if(config.mode==='live'&&!paratikaLedgerAccount(input.merchant))throw new Error('Paratika için Paraşüt bloke hesabı tanımlanmalı.');
   const options=installmentOptions(await posRequest('QUERYINSTALLMENT',{BIN:input.bin},fetch,input.merchant),input.merchant);
   if(!options.some(x=>x.count===input.installments&&x.system===input.paymentSystem))throw new Error('Seçilen taksit bu kart için kullanılamıyor. Seçenekleri yenileyin.');
   const state=randomBytes(32).toString('hex');
@@ -54,7 +54,7 @@ export async function createPayment(db:PosDb,input:ReturnType<typeof paymentInpu
 export function publicPayment(p:PosPayment){return {id:p.id,reference:p.merchant_payment_id,customerName:p.customer_name,amountMinor:Number(p.amount_minor),currency:p.currency,status:p.status,mode:p.mode,createdAt:p.created_at,expiresAt:p.expires_at,parasutState:p.parasut_state,blockDays:3,merchant:p.merchant,installments:p.installment_count||1};}
 export async function syncLedger(db:PosDb,payment:PosPayment){
   if(payment.status!=='paid'||payment.mode!=='live'||payment.parasut_state!=='pending')return;
-  const account=process.env[`PARATIKA_${payment.merchant}_PARASUT_ACCOUNT_ID`];
+  const account=paratikaLedgerAccount(payment.merchant);
   if(!account)return; // Leave pending until the dedicated blocked-funds account is configured.
   const {data:claim,error}=await db.rpc('claim_paratika_ledger',{p_id:payment.id});
   if(error||!claim)return;

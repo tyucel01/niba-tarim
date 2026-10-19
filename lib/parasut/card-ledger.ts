@@ -17,3 +17,9 @@ export async function createCardLedgerTransaction(params:{contactId:string;trans
   if (!response.ok || !json?.data?.id) throw new Error("Paraşüt tahsilatı doğrulanamadı; yeniden denemeden kontrol edin.");
   return json;
 }
+
+// The owner approved reusing the existing Card Transactions account for Tarım POS.
+// Other merchants remain unmapped unless explicitly configured.
+export function paratikaLedgerAccount(merchant:string,env=process.env){
+ return env[`PARATIKA_${merchant}_PARASUT_ACCOUNT_ID`] || (merchant==='10013929'?env.PARASUT_ACCOUNT_ID:undefined);
+}

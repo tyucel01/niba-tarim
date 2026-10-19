@@ -40,3 +40,7 @@ Dönüş adresi `/api/payments/paratika/callback?state=...` şeklinde işlem ba�
 `node tests/paratika/check.cjs` tutar ve banka yanıtı doğrulamasını, mevcut Paraşüt tahsilat/ödeme yönlerini sahte servislerle kontrol eder. Gerçek banka veya Paraşüt isteği göndermez. Veritabanı kurulumu yerel geçici PostgreSQL üzerinde ayrıca test edildi.
 
 Resmi kaynaklar: https://vpos.paratika.com.tr/paratika/api/v2/doc?language=tr ve https://www.paratika.com.tr/marka-kilavuzu/
+
+## Onaylanan Paraşüt hesap eşlemesi
+
+10013929 Tarım POS için mevcut Kart Çekimleri hesabının (`PARASUT_ACCOUNT_ID`) kullanılması kullanıcı tarafından onaylandı. Özel `PARATIKA_10013929_PARASUT_ACCOUNT_ID` yoksa yalnız bu hesapta mevcut hesaba kayıt atılır. 10013922 Normal POS için bu geri dönüş yoktur. Müşteri carisi her işlemde seçilen cari kimliğidir; Paraşüt hesabı cari seçiminden farklıdır.

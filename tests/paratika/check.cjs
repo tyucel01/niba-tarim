@@ -50,5 +50,8 @@ assert.equal((await server.posAuth(new Request('https://local',{headers:{authori
 if(oldAdmins===undefined)delete process.env.ADMIN_EMAILS;else process.env.ADMIN_EMAILS=oldAdmins;
 assert.equal(g.verifyQuery({...p,installment_count:3,payment_system:'Bank A'},query({...sale,installmentCount:2,paymentSystem:'Bank A'})).status,'review');
 assert.equal(g.verifyQuery({...p,installment_count:3,payment_system:'Bank A'},query({...sale,installmentCount:3,paymentSystem:'Bank A'})).status,'paid');
+assert.equal(ledger.paratikaLedgerAccount('10013929',{PARASUT_ACCOUNT_ID:'existing'}),'existing');
+assert.equal(ledger.paratikaLedgerAccount('10013922',{PARASUT_ACCOUNT_ID:'existing'}),undefined);
+assert.equal(ledger.paratikaLedgerAccount('10013929',{PARASUT_ACCOUNT_ID:'existing',PARATIKA_10013929_PARASUT_ACCOUNT_ID:'override'}),'override');
 console.log('Paratika doğrulama ve mevcut Paraşüt kayıt yönleri: başarılı. Dış servise istek gönderilmedi.');
 })().catch(e=>{console.error(e);process.exitCode=1});
