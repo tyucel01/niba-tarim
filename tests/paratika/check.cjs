@@ -33,7 +33,7 @@ assert.equal(g.installmentOptions(installments,'10013929',{}).length,2);
 assert.equal(g.installmentOptions(installments,'10013929',{})[0].commissionRate,null);
 assert.equal(g.installmentOptions(installments,'10013929',{PARATIKA_VERIFIED_TARIFFS_JSON:JSON.stringify({'test:10013929:Bank A:3':4.5})})[1].commissionRate,4.5);
 const params=g.sessionParams({...p,amount_minor:2650,customer_name:'test',customer_email:'',installment_count:3},'x','https://www.nibatarim.com');
-assert.equal('CUSTOMEREMAIL' in params,false);assert.equal(params.ALLOWEDINSTALLMENTS,'3');assert.equal(JSON.parse(params.EXTRA).IGNORECUSTOMERCOMMISSION,'YES');
+assert.equal('CUSTOMEREMAIL' in params,false);assert.equal('ALLOWEDINSTALLMENTS' in params,false);assert.equal(JSON.parse(params.EXTRA).IGNORECUSTOMERCOMMISSION,'YES');
 const frame=load('app/odeme/kart-formu/route.ts');const html=await frame.GET().text();
 const script=html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)[1];new vm.Script(script);
 assert.ok(html.includes("form.target='_top'"));assert.ok(!html.includes('localStorage'));assert.ok(html.includes('connect-src')===false);

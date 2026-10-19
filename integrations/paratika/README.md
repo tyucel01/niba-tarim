@@ -21,7 +21,7 @@ Kod hazır; gerçek tahsilat yapılmadı, veritabanı kurulumu ve canlı yayın 
 
 Kart formu panel içinde, analiz kodu yüklemeyen ayrı bir belge olarak açılır. Kart numarası/CVV doğrudan Paratika Direct Post 3D adresine gönderilir. Niba API'sine tam kart veya CVV kabul edilmez. Taksit sorgusuna yalnız ilk 8 hane gönderilir; saklanmaz. E-posta kullanıcıdan istenmez; Paratika müşteri bilgilendirme ayarı e-posta gerektiriyorsa canlı geçişten önce sağlayıcıyla çözülmelidir.
 
-Taksit seçenekleri QUERYINSTALLMENT ile seçilen hesap ve kart ön eki için alınır; ödeme oturumu açılırken sunucuda tekrar doğrulanır. SESSIONTOKEN'da ALLOWEDINSTALLMENTS ve IGNORECUSTOMERCOMMISSION=YES kullanılır. Böylece tahsilat miktarı müşteriye komisyon eklenmeden oluşturulur. Sağlayıcı kabulü test edilmeden bu davranış canlıda doğrulanmış sayılmaz.
+Taksit seçenekleri QUERYINSTALLMENT ile seçilen hesap ve kart ön eki için alınır; ödeme oturumu açılırken sunucuda tekrar doğrulanır. SESSIONTOKEN isteğinde IGNORECUSTOMERCOMMISSION=YES kullanılır; taksit sayısı Direct Post formundaki installmentCount alanında iletilir. ALLOWEDINSTALLMENTS oturum açılışına eklenmez. Böylece tahsilat miktarı müşteriye komisyon eklenmeden oluşturulur. Sağlayıcı kabulü test edilmeden bu davranış canlıda doğrulanmış sayılmaz.
 
 QUERYINSTALLMENT `customerCostCommissionRate` alanı Niba'nın komisyonu değildir. Niba komisyonu için `PARATIKA_VERIFIED_TARIFFS_JSON` içindeki sağlayıcı/sözleşme ile doğrulanmış, hesap+ortam+sistem+taksit bazlı oran kullanılır. Tanımsızsa oran ve net tutar gösterilmez. Bunlar yetkili sunucu ayarlarıdır; kullanıcı formdan değiştiremez. Hesaplanan net, mutabakat öncesi tahmindir.
 

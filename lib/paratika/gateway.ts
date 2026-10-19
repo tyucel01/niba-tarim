@@ -61,8 +61,7 @@ export function sessionParams(payment: PosPayment, callbackState: string, origin
     AMOUNT:money(Number(payment.amount_minor)),CURRENCY:"TRY",CUSTOMER:payment.customer_id,CUSTOMERNAME:payment.customer_name,
     ...(payment.customer_email?{CUSTOMEREMAIL:payment.customer_email}:{}),RETURNURL:`${origin}/api/payments/paratika/callback?state=${encodeURIComponent(callbackState)}`,
     EXTRA:JSON.stringify({IGNORECUSTOMERCOMMISSION:"YES",AlwaysSaveCard:"false"}),
-    ALLOWEDINSTALLMENTS:String(payment.installment_count || 1),
-    ORDERITEMS:JSON.stringify([{productCode:payment.merchant_payment_id,name:"Niba Tarım Tahsilatı",quantity:1,amount:Number(payment.amount_minor)/100}]),
+    ORDERITEMS:JSON.stringify([{productCode:"NIBA-TAHSILAT",name:"Niba Tarım Tahsilatı",quantity:1,amount:Number(payment.amount_minor)/100}]),
   };
 }
 export type VerifiedResult = {status: "pending"|"paid"|"failed"|"review"; transactionId?: string; paidDate?: string; reason: string};
@@ -127,7 +126,7 @@ export function requireSessionToken(response:any):string {
   const raw=response?.errorCode||response?.ERRORCODE||response?.responseCode;
   const code=typeof raw==='string'&&/^[A-Za-z0-9_-]{1,40}$/.test(raw)?raw:'SESSION_REJECTED';
   // Never expose raw provider messages: they may echo request fields.
-  const detail=String(response?.errorMsg||response?.responseMsg||'').toUpperCase();
+  const detail=JSON.stringify(response||{}).toUpperCase();
   const fields=['CUSTOMEREMAIL','CUSTOMERNAME','CUSTOMERIP','RETURNURL','ORDERITEMS','SESSIONEXPIRY','ALLOWEDINSTALLMENTS'].filter(k=>detail.includes(k));
   throw new PaymentSessionError(code,true,`Paratika ödeme oturumunu kabul etmedi (${code}).${fields.length?' Kontrol edilecek alan: '+fields.join(', ')+'.':''} Karttan çekim başlatılmadı.`);
  }
