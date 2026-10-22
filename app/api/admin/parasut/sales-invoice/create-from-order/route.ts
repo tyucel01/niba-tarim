@@ -1,6 +1,6 @@
 import { purchaseBillIds } from "@/lib/orders/purchase-matches";
 import { mergePurchaseSources, purchaseSourceUsage } from "@/lib/parasut/purchase-sources";
-import { assignmentLines, purchaseLineUsedTons } from "@/lib/orders/purchase-line-usage";
+import { assignmentLines, purchaseLineUsedTons, canChoosePurchaseSources } from "@/lib/orders/purchase-line-usage";
 import { salesPart, purchaseAllocation } from "@/lib/orders/sales-progress";
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
@@ -491,13 +491,14 @@ export async function POST(req: NextRequest) {
 
     const { assignments, reservations, orders: priorOrders } = await purchaseSourceUsage(supabase, billIds);
     const own = assignments.find((a: any) => a.order_id === order.id);
+    const selectionLocked = Boolean(own && Number(order.sales_invoiced_tonnage)>0 && !canChoosePurchaseSources(order, reservations));
     const unknownUsage = (priorOrders || []).some((o: any) => (o.sales_invoice_id || Number(o.sales_invoiced_tonnage)>0 || (reservations || []).some((part: any) => part.order_id === o.id)) && !(assignments || []).some((a: any) => a.order_id === o.id));
     if (body.sourceOnly && !confirm) {
       const lines = preview.sourceLines.map((line: any) => {
         const used = purchaseLineUsedTons(assignments || [], reservations || [], order.matched_purchase_invoice_id, line.id, order.id);
         return { ...line, remainingTons: Math.max(0, line.tons-purchaseLineUsedTons(assignments || [], reservations || [], order.matched_purchase_invoice_id, line.id)), availableForOrder: Math.max(0,line.tons-used) };
       });
-      return NextResponse.json({success:true,sourceLines:lines,selectedLineIds:assignmentLines(own).map(line => line.id),selectionLocked:Boolean(own && Number(order.sales_invoiced_tonnage)>0),warning:unknownUsage ? "Bu alış faturasının geçmiş satışlarında kullanılan kalemler kayıtlı değil. Miktarları Paraşüt üzerinde kontrol etmeden yeni fatura kesilemez." : ""});
+      return NextResponse.json({success:true,sourceLines:lines,selectedLineIds:assignmentLines(own).map(line => line.id).filter(id => selectionLocked || lines.some((line: any) => line.id === id && line.remainingTons > .000001)),selectionLocked,warning:unknownUsage ? "Bu alış faturasının geçmiş satışlarında kullanılan kalemler kayıtlı değil. Miktarları Paraşüt üzerinde kontrol etmeden yeni fatura kesilemez." : ""});
     }
     if (!payload) throw new Error("Fatura kalemi seçilmedi.");
     const selectedLines = preview.selectedSourceLines as {id: string; tons: number}[];
@@ -507,7 +508,7 @@ export async function POST(req: NextRequest) {
     }
     if (unknownUsage) throw new Error("Geçmiş satışların hangi alış kaleminden kesildiği doğrulanamadı. Paraşüt üzerinde mevcut faturaları kontrol edin; yeni fatura oluşturulmadı.");
     const canonical = (lines: {id:string; tons:number}[]) => JSON.stringify([...lines].sort((a,b) => a.id.localeCompare(b.id)).map(l => [l.id, Number(l.tons)]));
-    if (own && Number(order.sales_invoiced_tonnage)>0 && canonical(assignmentLines(own)) !== canonical(selectedLines)) throw new Error("Kısmen faturalanmış siparişin ürün kalemleri değiştirilemez.");
+    if (selectionLocked && canonical(assignmentLines(own)) !== canonical(selectedLines)) throw new Error("Kısmen faturalanmış siparişin ürün kalemleri değiştirilemez.");
     const fingerprint = createHash("sha256").update(JSON.stringify({payload,selectedLines})).digest("hex");
     if (confirm && body.previewFingerprint !== fingerprint) return NextResponse.json({ success: false, error: "Fatura bilgileri önizlemeden sonra değişti. Önizlemeyi yeniden oluşturun." }, { status: 409 });
     if (!confirm) {
