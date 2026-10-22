@@ -23,11 +23,11 @@ export async function purchaseSourceUsage(db: any, billIds: string[]) {
   let assignments: any[] = [], reservations: any[] = [];
   for (let start = 0; start < orders.length; start += 200) {
     const ids = orders.slice(start, start + 200).map(order => order.id);
-    for (const [table, fields] of [["order_purchase_line_assignments", "order_id,purchase_bill_id,line_id,source_tons,lines"], ["order_sales_invoice_parts", "order_id,tons,state"]]) {
+    for (const [table, fields] of [["order_purchase_line_assignments", "order_id,purchase_bill_id,line_id,source_tons,lines"], ["order_sales_invoice_parts", "order_id,tons,state,source_lines"]]) {
       // Reservations/history may exceed a single Data API page.
       for (let offset = 0; ; offset += 1000) {
         let query = db.from(table).select(fields).in("order_id", ids);
-        if (table === "order_sales_invoice_parts") query = query.eq("state", "creating");
+        if (table === "order_sales_invoice_parts") query = query.neq("state", "failed");
         const {data, error} = await query.range(offset, offset + 999);
         if (error) throw new Error("Kalemlerin kalan miktarı alınamadı. Yeniden deneyin.");
         if (table === "order_purchase_line_assignments") assignments.push(...(data || []).map((row: any) => ({...row, siparisler: orders.find(order => order.id === row.order_id)})));

@@ -8,3 +8,20 @@ test('multi-line consumption splits invoiced and pending tons without double cou
  assert.equal(exportsObject.purchaseLineUsedTons(a,r,'bill','b'),15);
  assert.equal(exportsObject.purchaseLineUsedTons(a,r,'bill','a','multi'),0);
 });
+
+test('an issued first 27 tons stays on the first bill after selecting the second bill',()=>{
+ const order={id:'sale',matched_purchase_invoice_id:'first',sales_invoiced_tonnage:27,purchase_invoice_matches:[{purchaseBillId:'first'},{purchaseBillId:'second'}]};
+ const assignments=[{order_id:'sale',purchase_bill_id:'first',lines:[{id:'second:b',tons:27}],siparisler:order}];
+ const parts=[{order_id:'sale',state:'issued',tons:27,source_lines:[{id:'first:a',tons:27}]},{order_id:'sale',state:'creating',tons:27,source_lines:[{id:'second:b',tons:27}]}];
+ assert.equal(exportsObject.purchaseLineUsedTons(assignments,parts,'first','a'),27);assert.equal(exportsObject.purchaseLineUsedTons(assignments,parts,'first','second:b'),27);
+ parts[1].state='failed';assert.equal(exportsObject.purchaseLineUsedTons(assignments,parts,'first','second:b'),0);assert.equal(exportsObject.purchaseLineUsedTons(assignments,parts,'first','a'),27);
+ assert.equal(exportsObject.canChoosePurchaseSources(order,parts),true);
+});
+test('legacy sources stay locked without complete per-invoice attribution; single-source partial mix stays fixed',()=>{
+ const order={id:'sale',sales_invoiced_tonnage:27,purchase_invoice_matches:[{purchaseBillId:'first'},{purchaseBillId:'second'}]};
+ assert.equal(exportsObject.canChoosePurchaseSources(order,[]),false);
+ const parts=[{order_id:'sale',state:'issued',tons:27,source_lines:[{id:'first:a',tons:27}]}];
+ assert.equal(exportsObject.canChoosePurchaseSources(order,parts),true);
+ assert.equal(exportsObject.canChoosePurchaseSources({...order,purchase_invoice_matches:[{purchaseBillId:'first'}]},parts),false);
+ assert.equal(exportsObject.canChoosePurchaseSources(order,[...parts,{order_id:'sale',state:'creating',tons:1}]),false);
+});
