@@ -8,7 +8,7 @@ test('VAT is included in selling total and original rate is preserved',()=>{cons
 test('invalid allocation blocks invoice creation',()=>{assert.throws(()=>build(0),/ayrılan/);assert.throws(()=>build(12000),/ayrılan/)});
 test('reusable list omits exhausted bills and totals multiple allocations',async()=>{
  const pool=[{e_invoice_id:'a',purchase_bill_id:'a',total:100000},{e_invoice_id:'b',purchase_bill_id:'b',total:100000}];const orders=[{matched_purchase_invoice_id:'a',matched_purchase_allocated_amount:40000},{matched_purchase_invoice_id:'a',matched_purchase_allocated_amount:20000},{matched_purchase_invoice_id:'b',matched_purchase_allocated_amount:100000}];
- const db={from:table=>{const q={select:()=>q,eq:()=>q,order:async()=>({data:pool}),in:()=>q,range:async()=>({data:orders})};return q}};
+ const db={from:table=>{const q={select:()=>q,eq:()=>q,order:async()=>({data:pool}),in:()=>q,not:()=>q,range:async()=>({data:orders})};return q}};
  const module={exports:{}};const code=ts.transpile(fs.readFileSync(path.join(__dirname,'../lib/parasut/invoice-pool.ts'),'utf8'),{module:ts.ModuleKind.CommonJS});const sandbox={module,exports:module.exports,require:name=>name.includes("sales-progress")?{purchaseAllocation:ctx.purchaseAllocation}:({createClient:()=>db}),process:{env:{}}};vm.createContext(sandbox);vm.runInContext(code,sandbox);const result=await sandbox.exports.reusableInvoices();assert.equal(result.length,1);assert.equal(result[0].allocated_amount,60000);assert.equal(result[0].remaining_amount,40000);
 });
 test('54 tons can be invoiced as 27 plus 27 with unchanged unit price and zero VAT',()=>{
@@ -82,4 +82,9 @@ test('printed invoice note includes only the plate without repeating the automat
  assert.equal(result.payload.data.attributes.invoice_note,'Plaka: 33 ABC 123');
  assert.equal(result.payload.data.relationships.details.data[0].attributes.description,'20-20-0 Zn');
  assert.equal(ctx.buildSalesInvoicePayload({...args,order:{...args.order,plaka:''}}).payload.data.attributes.invoice_note,'');
+});
+test('secondary invoices include their own allocations and reserved refunds in reusable balance',async()=>{
+ const pool=[{e_invoice_id:'second-e',purchase_bill_id:'second',total:700}];const orders=[{matched_purchase_invoice_id:'first',purchase_invoice_matches:[{purchaseBillId:'first',allocatedAmount:400},{purchaseBillId:'second',allocatedAmount:600,refundAmount:50}]}];
+ const db={from:table=>{const q={select:()=>q,eq:()=>q,not:()=>q,order:async()=>({data:pool}),range:async()=>({data:orders})};return q;}};
+ const mod={exports:{}};const sandbox={module:mod,exports:mod.exports,require:n=>n.includes('sales-progress')?{purchaseAllocation:ctx.purchaseAllocation}:{createClient:()=>db},process:{env:{}}};vm.runInNewContext(ts.transpile(fs.readFileSync('lib/parasut/invoice-pool.ts','utf8'),{module:ts.ModuleKind.CommonJS}),sandbox);const rows=await mod.exports.reusableInvoices();assert.equal(rows.length,1);assert.equal(rows[0].allocated_amount,650);assert.equal(rows[0].remaining_amount,50);
 });

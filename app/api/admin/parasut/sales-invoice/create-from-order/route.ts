@@ -1,3 +1,5 @@
+import { purchaseBillIds } from "@/lib/orders/purchase-matches";
+import { mergePurchaseSources, purchaseSourceUsage } from "@/lib/parasut/purchase-sources";
 import { assignmentLines, purchaseLineUsedTons } from "@/lib/orders/purchase-line-usage";
 import { salesPart, purchaseAllocation } from "@/lib/orders/sales-progress";
 import { createHash } from "node:crypto";
@@ -262,7 +264,7 @@ function buildSalesInvoicePayload({
     if (!(tons > 0)) throw new Error("Alış faturasında kg/ton dışında birim var. Teslim tonajına göre otomatik fatura oluşturulamaz.");
     return { row, quantity, tons, vatRate, net, unit, productId, name: clean(product?.attributes?.name) || clean(attr.product_name) || clean(attr.description) };
   });
-  const choices = allSourceLines.map((line: any) => ({ id: String(line.row.id || ""), name: line.name, tons: line.tons, quantity: line.quantity, unit: line.unit, vatRate: line.vatRate, amount: line.net * (1 + line.vatRate / 100) }));
+  const choices = allSourceLines.map((line: any) => ({ id: String(line.row.id || ""), name: line.row.source_invoice_no ? `${line.name} · ${line.row.source_invoice_no}` : line.name, tons: line.tons, quantity: line.quantity, unit: line.unit, vatRate: line.vatRate, amount: line.net * (1 + line.vatRate / 100) }));
   if (choices.some((line: any) => !line.id)) throw new Error("Alış faturası kalem kimlikleri alınamadı. Faturayı yeniden yükleyin.");
   if (sourceOnly) return { payload: null, preview: { sourceLines: choices } as any };
   const selectedIds = sourceLineIds || (sourceLineId ? [sourceLineId] : []);
@@ -474,11 +476,8 @@ export async function POST(req: NextRequest) {
     if (part.blocked) return NextResponse.json({success:false,error:"Önceki satış faturası resmileştirme kontrolü bekliyor. Paraşüt üzerinde kontrol edin."},{status:409});
     const token = await getAccessToken();
 
-    const purchaseBill = await parasutGet(
-      token,
-      companyId,
-      `/purchase_bills/${order.matched_purchase_invoice_id}?include=details,details.product`
-    );
+    const billIds = purchaseBillIds(order);
+    const purchaseBill = mergePurchaseSources(order, await Promise.all(billIds.map(id => parasutGet(token, companyId, `/purchase_bills/${encodeURIComponent(id)}?include=details,details.product`))));
 
     const { payload, preview } = buildSalesInvoicePayload({
       order,
@@ -490,13 +489,8 @@ export async function POST(req: NextRequest) {
       sourceOnly: Boolean(body.sourceOnly) && !confirm,
     });
 
-    const { data: assignments, error: assignmentError } = await supabase.from("order_purchase_line_assignments").select("order_id,line_id,source_tons,lines,siparisler!inner(sales_invoiced_tonnage,matched_purchase_invoice_id)").eq("purchase_bill_id", String(order.matched_purchase_invoice_id));
-    if (assignmentError) throw new Error("Kalemlerin kalan miktarı alınamadı. Yeniden deneyin.");
-    const own = (assignments || []).find((a: any) => a.order_id === order.id);
-    const { data: priorOrders, error: priorError } = await supabase.from("siparisler").select("id,sales_invoice_id,sales_invoiced_tonnage").eq("matched_purchase_invoice_id", order.matched_purchase_invoice_id);
-    if (priorError) throw new Error("Geçmiş fatura miktarları kontrol edilemedi.");
-    const { data: reservations, error: reservationError } = await supabase.from("order_sales_invoice_parts").select("order_id,tons,state").eq("state", "creating").in("order_id", (priorOrders || []).map((item: any) => item.id));
-    if (reservationError) throw new Error("Devam eden fatura miktarları kontrol edilemedi.");
+    const { assignments, reservations, orders: priorOrders } = await purchaseSourceUsage(supabase, billIds);
+    const own = assignments.find((a: any) => a.order_id === order.id);
     const unknownUsage = (priorOrders || []).some((o: any) => (o.sales_invoice_id || Number(o.sales_invoiced_tonnage)>0 || (reservations || []).some((part: any) => part.order_id === o.id)) && !(assignments || []).some((a: any) => a.order_id === o.id));
     if (body.sourceOnly && !confirm) {
       const lines = preview.sourceLines.map((line: any) => {
