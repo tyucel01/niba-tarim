@@ -1,3 +1,4 @@
+import { hasPurchaseMatch, remainingPurchaseAmount } from "@/lib/orders/purchase-matches";
 import { convertStockLine, normalizeInvoiceUnit, type StockSelection } from "@/lib/parasut/stock-conversion";
 import { stockConfirmation, checkStockConfirmation } from "@/lib/parasut/stock-confirmation";
 import { authorizeWhatsApp } from "@/lib/whatsapp/admin";
@@ -370,7 +371,7 @@ export async function POST(req: NextRequest) {
     const differenceMode = clean(body?.differenceMode || "keep");
     const confirmedAvailable = Number(body?.confirmedAvailable);
     const confirmedExpected = Number(body?.confirmedExpected);
-    if (!["keep", "accept", "refund"].includes(differenceMode) || !Number.isFinite(confirmedAvailable) || !Number.isFinite(confirmedExpected) || confirmedAvailable <= 0 || confirmedExpected <= 0) return NextResponse.json({ success: false, error: "Fatura ve sipariş tutarını kontrol ederek tekrar onaylayın." }, { status: 422 });
+    if (!["keep", "accept", "refund"].includes(differenceMode) || !Number.isFinite(confirmedAvailable) || !Number.isFinite(confirmedExpected) || confirmedAvailable <= 0 || confirmedExpected < 0) return NextResponse.json({ success: false, error: "Fatura ve sipariş tutarını kontrol ederek tekrar onaylayın." }, { status: 422 });
     const allocationArgs = { p_order_id: siparisId, p_e_invoice_id: eInvoiceId, p_mode: differenceMode, p_confirmed_available: confirmedAvailable, p_confirmed_expected: confirmedExpected };
 
     if (!siparisId) {
@@ -398,7 +399,7 @@ export async function POST(req: NextRequest) {
     }
     const { data: existingOrder, error: existingOrderError } = await supabase
   .from("siparisler")
-  .select("id, gelenFatura, matched_purchase_invoice_id, matched_purchase_invoice_no,tedarikciyeOdenecekTutar,alisFiyati,teslimOlanTonaj")
+  .select("id,gelenFatura,matched_purchase_invoice_id,matched_purchase_invoice_no,matched_purchase_invoice_total,matched_purchase_allocated_amount,purchase_invoice_matches,purchase_difference_mode,purchase_difference_amount,purchase_refund_id,purchase_refund_state,purchase_refund_issue_state,sales_invoice_id,sales_invoice_history,alisFiyati,teslimOlanTonaj")
   .eq("id", siparisId)
   .single();
 
@@ -413,22 +414,15 @@ if (existingOrderError) {
   );
 }
 
-if (existingOrder?.matched_purchase_invoice_id) {
-  return NextResponse.json(
-    {
-      success: false,
-      step: "already_matched",
-      message: `Bu sipariş zaten ${existingOrder.matched_purchase_invoice_no || existingOrder.gelenFatura || "bir fatura"} ile eşleşmiş. Tekrar gider kaydı oluşturmadım.`,
-    },
-    { status: 409 }
-  );
-}
+    if (hasPurchaseMatch(existingOrder, eInvoiceId)) return NextResponse.json({ success: false, step: "already_matched", error: "Bu fatura zaten bu satışa bağlı. Tekrar gider kaydı oluşturulmadı." }, { status: 409 });
+    if (Number(existingOrder.purchase_difference_amount) > 0 && (existingOrder.purchase_difference_mode === "refund" || existingOrder.purchase_refund_id) && existingOrder.purchase_refund_issue_state !== "submitted") return NextResponse.json({ success: false, error: "Önceki faturanın fazla tutarı için iade kararı veya işlemi henüz tamamlanmamış. Önce mevcut farkı kontrol edin." }, { status: 409 });
 
     if (!(toNumber(existingOrder?.teslimOlanTonaj)>0) || !(toNumber(existingOrder?.alisFiyati)>0)) return NextResponse.json({success:false,error:"Teslim olan tonaj ve alış fiyatı girilmeden alış faturası eşleştirilemez."},{status:422});
     const token = await getAccessToken();
 
     const { data: storedInvoice, error: storedError } = await supabase.from("purchase_invoice_pool").select("*").eq("e_invoice_id", eInvoiceId).maybeSingle();
     if (storedError) throw new Error("Fatura takip kaydı okunamadı.");
+    if (storedInvoice && hasPurchaseMatch(existingOrder, eInvoiceId, String(storedInvoice.purchase_bill_id || ""))) return NextResponse.json({ success: false, step: "already_matched", error: "Bu fatura zaten bu satışa bağlı. Tekrar gider kaydı oluşturulmadı." }, { status: 409 });
     if (storedInvoice && body?.preview === true) return NextResponse.json({ success: false, error: "Bu fatura için kayıt zaten başlatılmış veya tamamlanmış. Listeyi yenileyin; tekrar dönüşüm yapılmadı." }, { status: 409 });
     if (storedInvoice) {
       if (String(storedInvoice.supplier_id) !== supplierId) return NextResponse.json({ success: false, error: "Fatura kayıtlı tedarikçi cari kartıyla eşleşmiyor." }, { status: 422 });
@@ -459,11 +453,12 @@ if (existingOrder?.matched_purchase_invoice_id) {
     const previewResponse = await fetch(`${BASE_URL}/v4/${companyId}/e_invoices/${encodeURIComponent(eInvoiceId)}/convert`, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, cache: "no-store" });
     const previewData = await previewResponse.json().catch(() => null);
     const previewTotal = toNumber(previewData?.data?.attributes?.net_total);
-    const expected = toNumber(existingOrder?.alisFiyati) * toNumber(existingOrder?.teslimOlanTonaj);
-    if (!previewResponse.ok || expected <= 0 || previewTotal <= 0 || !["TRL","TRY"].includes(previewData?.data?.attributes?.currency)) return NextResponse.json({ success: false, error: "Fatura tutarı sipariş alış tutarını karşılamıyor veya TL tutarı doğrulanamadı." }, { status: 422 });
+    const expected = remainingPurchaseAmount(existingOrder, toNumber(existingOrder?.alisFiyati) * toNumber(existingOrder?.teslimOlanTonaj));
+    if (!previewResponse.ok || expected < 0 || previewTotal <= 0 || !["TRL","TRY"].includes(previewData?.data?.attributes?.currency)) return NextResponse.json({ success: false, error: "Fatura tutarı sipariş alış tutarını karşılamıyor veya TL tutarı doğrulanamadı." }, { status: 422 });
     const difference = Math.round((previewTotal - expected) * 100) / 100;
     if (Math.round(previewTotal * 100) !== Math.round(confirmedAvailable * 100) || Math.round(expected * 100) !== Math.round(confirmedExpected * 100)) return NextResponse.json({success:false,error:"Fatura veya sipariş tutarı değişti. Listeyi yenileyip yeniden onaylayın."},{status:409});
     if ((difference < 0 && differenceMode !== "accept") || (differenceMode === "refund" && difference <= 0)) return NextResponse.json({success:false,error:"Fatura farkı için uygun işlemi seçip onaylayın."},{status:422});
+    if (differenceMode === "keep" && expected === 0) return NextResponse.json({success:false,error:"Satışın alış tutarı zaten karşılanmış. Fazla tutarı kabul edin veya iade için ayırın."},{status:422});
     const selections = body?.stockSelections;
     const mappedLines = await mappedStockLines(token, companyId, previewData, selections);
     const purchaseBillPayload = await buildPurchaseBillPayload(previewData, supplierId, eInvoiceId, mappedLines);

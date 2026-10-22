@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import SevkForm from "../sevk-form";
+import { purchaseMatches, remainingPurchaseAmount } from "@/lib/orders/purchase-matches";
 import StockMapping from "@/app/admin/parasut/components/stock-mapping";
 import { orderStage, stageLabels } from "@/lib/orders/workflow";
 
@@ -233,15 +234,15 @@ export default function SiparisDetayPage() {
   function invoiceMatchBody(invoice: any) {
     const detail = invoiceDetails[String(invoice.id)];
     const available = numberValue(invoice.remaining_amount ?? detail?.net_total);
-    const difference = Math.round((available - calc.toplamAlisTutari) * 100) / 100;
+    const difference = Math.round((available - remainingPurchaseAmount(siparis, calc.toplamAlisTutari)) * 100) / 100;
     return { siparisId: siparis.id, eInvoiceId: invoice.id, supplierId: selectedSupplierId,
       differenceMode: difference < 0 ? "accept" : differenceModes[String(invoice.id)] || "keep",
-      confirmedAvailable: available, confirmedExpected: Math.round(calc.toplamAlisTutari * 100) / 100 };
+      confirmedAvailable: available, confirmedExpected: remainingPurchaseAmount(siparis, calc.toplamAlisTutari) };
   }
   async function previewStock(invoice: any, stockSelections: any[]) {
     const response = await fetch("/api/admin/parasut/e-invoice/import-and-match", { method: "POST", headers: await invoiceHeaders(), body: JSON.stringify({ ...invoiceMatchBody(invoice), preview: true, stockSelections }) });
     const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(typeof data.error === "string" ? data.error : "Dönüşüm önizlemesi alınamadı.");
+    if (!response.ok || !data.success) throw new Error(typeof data.error === "string" ? data.error : data.message || "Dönüşüm önizlemesi alınamadı.");
     return data;
   }
 
@@ -268,10 +269,10 @@ export default function SiparisDetayPage() {
     if (!invoice.reusable && !stockProof?.stockConfirmation) { await panelAlert("Önce stok ürünlerini seçip dönüştürülecek hali görüntüleyin."); return; }
     const available = invoice.remaining_amount ?? detail.net_total;
     if (!["TRL","TRY"].includes(detail.currency) || !(numberValue(available)>0)) { await panelAlert("Pozitif TL fatura tutarı doğrulanamadı."); return; }
-    const difference = Math.round((numberValue(available)-calc.toplamAlisTutari)*100)/100;
+    const difference = Math.round((numberValue(available)-remainingPurchaseAmount(siparis, calc.toplamAlisTutari))*100)/100;
     const differenceMode = difference < 0 ? "accept" : differenceModes[String(invoice.id)] || "keep";
     const outcome = differenceMode === "refund" ? "Fazla tutar bu satışta iade için ayrılacak. Eşleştirme sonrası fark iadesini oluşturabilirsiniz." : differenceMode === "accept" ? "Fark kabul edilerek faturanın kalan tutarının tamamı bu satışa bağlanacak." : "Sipariş tutarı ayrılacak; kalan tutar başka siparişlerde kullanılabilecek.";
-    const confirmText = `${getContactName(selectedContact)}\nFatura: ${getInvoiceNo(invoice)}\nFatura tutarı: ${formatInvoiceMoney(detail.net_total, detail.currency)}\nKullanılabilir tutar: ${formatMoney(available)}\nSiparişten beklenen: ${formatMoney(calc.toplamAlisTutari)}\nFark: ${formatMoney(Math.abs(difference))} ${difference < 0 ? "eksik" : difference > 0 ? "fazla" : "(eşit)"}\n${outcome}\nBu şekilde ilerlemek istediğinizden emin misiniz?`;
+    const confirmText = `${getContactName(selectedContact)}\nFatura: ${getInvoiceNo(invoice)}\nFatura tutarı: ${formatInvoiceMoney(detail.net_total, detail.currency)}\nKullanılabilir tutar: ${formatMoney(available)}\nSiparişin henüz faturaya bağlanmamış tutarı: ${formatMoney(remainingPurchaseAmount(siparis, calc.toplamAlisTutari))}\nFark: ${formatMoney(Math.abs(difference))} ${difference < 0 ? "eksik" : difference > 0 ? "fazla" : "(eşit)"}\n${outcome}\nBu şekilde ilerlemek istediğinizden emin misiniz?`;
 
     const conversionText = invoice.reusable ? "" : `\n\nDönüştürülecek hali:\n${stockProof.stockPreview.lines.map((line: any) => `${line.sourceName} → ${line.productName}\n${formatNumber(line.sourceQuantity)} ${line.sourceUnit} × ${formatInvoiceMoney(line.sourceUnitPrice, detail.currency)} → ${formatNumber(line.quantity)} ${line.targetUnit} × ${formatInvoiceMoney(line.unitPrice, detail.currency)}\nKDV: %${line.vatRate} · İskonto: ${line.discountType === "percentage" ? "%" + line.discountValue : formatMoney(line.discountValue)} · Ara toplam: ${formatMoney(line.netTotal)}`).join("\n\n")}\nGenel toplam: ${formatMoney(stockProof.stockPreview.total)}\nBu stok karşılıkları ve dönüştürülmüş miktar/fiyatlarla alış faturasını kaydetmeyi teyit ediyor musunuz?`;
     if (!(await panelConfirm(confirmText + conversionText))) return;
@@ -288,7 +289,7 @@ export default function SiparisDetayPage() {
           supplierId: selectedSupplierId,
           differenceMode,
           confirmedAvailable: numberValue(available),
-          confirmedExpected: Math.round(calc.toplamAlisTutari*100)/100,
+          confirmedExpected: remainingPurchaseAmount(siparis, calc.toplamAlisTutari),
           ...(invoice.reusable ? {} : { stockSelections: stockProof.stockSelections, stockConfirmation: stockProof.stockConfirmation, confirmStock: true }),
         }),
       });
@@ -618,6 +619,11 @@ export default function SiparisDetayPage() {
                 </div>
               )}
 
+              {purchaseMatches(siparis).length > 1 && <div className="mt-3 space-y-2 rounded-xl bg-emerald-50 p-3 text-sm">
+                <p className="font-bold">Bu satışa bağlı alış faturaları</p>
+                {purchaseMatches(siparis).map((match: any) => <p key={match.purchaseBillId}>{match.invoiceNo || match.purchaseBillId} · Bu satışa ayrılan: {formatMoney(match.allocatedAmount)}{Number(match.refundAmount)>0 ? ` · İade için ayrılan: ${formatMoney(match.refundAmount)}` : ""}</p>)}
+                <p className="font-bold">Henüz faturaya bağlanmamış alış tutarı: {formatMoney(remainingPurchaseAmount(siparis, calc.toplamAlisTutari))}</p>
+              </div>}
               {siparis.purchase_difference_confirmed_at && siparis.purchase_difference_mode !== "keep" && <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
                 <p className="font-bold">Onaylanan fatura farkı: {formatMoney(Math.abs(numberValue(siparis.purchase_difference_amount)))} {numberValue(siparis.purchase_difference_amount)<0 ? "eksik" : "fazla"}</p>
                 <p className="mt-1">{siparis.purchase_difference_mode === "refund" ? "Fazla tutar iade için ayrıldı." : "Fark kabul edilerek bu satışa bağlandı."}</p>
@@ -654,7 +660,7 @@ export default function SiparisDetayPage() {
                     const taxMatches = Boolean(vkn && vkn === getContactTaxNo(selectedContact));
                     const rowMatch = findBestContactMatch(siparis, invoice, contacts);
                     const available = numberValue(invoice.remaining_amount ?? total);
-                    const difference = Math.round((available-calc.toplamAlisTutari)*100)/100;
+                    const difference = Math.round((available-remainingPurchaseAmount(siparis, calc.toplamAlisTutari))*100)/100;
 
                     return (
                       <div
@@ -697,7 +703,7 @@ export default function SiparisDetayPage() {
                           {detailError[String(invoice.id)] && <p role="alert" className="mt-3 text-sm text-red-700">{detailError[String(invoice.id)]} <button type="button" onClick={() => loadInvoiceDetail(invoice)} className="underline">Yeniden dene</button></p>}
                           {detail && <div className="mt-3 space-y-3">
                             <p className="text-sm">Ara toplam: {formatInvoiceMoney(detail.gross_total, currency)} · KDV: {formatInvoiceMoney(detail.total_vat, currency)} · Genel toplam: {formatInvoiceMoney(detail.net_total, currency)}</p>
-                            {detail.net_total != null && (currency === "TRL" || currency === "TRY") && <p className="rounded-xl bg-amber-50 p-3 text-sm font-bold">Sipariş tutarıyla fark: {formatMoney(numberValue(detail.net_total) - calc.toplamAlisTutari)}. Miktar, birim fiyat ve KDV kapsamını kontrol edin.</p>}
+                            {detail.net_total != null && (currency === "TRL" || currency === "TRY") && <p className="rounded-xl bg-amber-50 p-3 text-sm font-bold">Sipariş tutarıyla fark: {formatMoney(numberValue(detail.net_total) - remainingPurchaseAmount(siparis, calc.toplamAlisTutari))}. Miktar, birim fiyat ve KDV kapsamını kontrol edin.</p>}
                             {detail.plates?.length > 0 && <p className="rounded-xl bg-white p-3 text-sm font-bold text-slate-800">Fatura plakası: {detail.plates.join(" · ")}</p>}<div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">Ürün / açıklama</th><th className="p-2">Miktar</th><th className="p-2">Birim fiyat</th><th className="p-2">KDV</th><th className="p-2">Kalem tutarı</th></tr></thead><tbody>{detail.details.map((line: any, index: number) => <tr key={index} className="border-t border-slate-200"><td className="p-2"><p>{line.product_mapping_name || line.product_name || "Ürün kalemi"}</p>{line.plates?.length > 0 && <p className="mt-1 text-xs font-semibold text-slate-600">Plaka: {line.plates.join(" · ")}</p>}</td><td className="p-2">{formatNumber(line.quantity)} {line.unit || line.unit_name || line.unit_code || ""}</td><td className="p-2">{formatInvoiceMoney(line.unit_price, currency)}</td><td className="p-2">%{formatNumber(line.vat_rate)}</td><td className="p-2">{formatInvoiceMoney(line.net_total, currency)}</td></tr>)}</tbody></table></div>
                             {!invoice.reusable && detail.details.length > 0 && <StockMapping key={`${invoice.id}:${selectedSupplierId}`} invoiceId={String(invoice.id)} supplierId={selectedSupplierId} lines={detail.details} contextKey={JSON.stringify(invoiceMatchBody(invoice))} disabled={matchingInvoice} headers={invoiceHeaders} confirmNew={panelConfirm} requestPreview={selections => previewStock(invoice, selections)} onChange={value => setStockProofs(previous => ({ ...previous, [String(invoice.id)]: value }))} />}
                             {!detail.details.length && <p className="text-sm text-amber-800">Fatura kalemleri alınamadı; giderleştirme kapalı.</p>}

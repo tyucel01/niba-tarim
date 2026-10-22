@@ -28,7 +28,7 @@ async function context(orderId: string) {
   const {data:order,error} = await db.from("siparisler").select("*").eq("id",orderId).single();
   if (error || !order) throw new Error("Sipariş bulunamadı.");
   if (!["accept","refund"].includes(order.purchase_difference_mode) || !(Number(order.purchase_difference_amount)>0)) throw new Error("Bu satışta iade edilebilecek onaylı fazla tutar yok.");
-  const {data:bill,error:billError} = await db.from("purchase_invoice_pool").select("*").eq("purchase_bill_id",order.matched_purchase_invoice_id).single();
+  const {data:bill,error:billError} = await db.from("purchase_invoice_pool").select("*").eq("purchase_bill_id",(order.purchase_difference_invoice_id || order.matched_purchase_invoice_id)).single();
   if (billError || !bill || bill.state !== "ready") throw new Error("Kaynak alış faturası doğrulanamadı.");
   const token = await accessToken();
   const company = process.env.PARASUT_COMPANY_ID;
