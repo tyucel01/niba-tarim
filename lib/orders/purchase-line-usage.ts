@@ -7,7 +7,6 @@ const billedStates = ["created", "issued", "needs_review"];
 const hasSources = (part: any) => Array.isArray(part.source_lines) && part.source_lines.length > 0;
 export function canChoosePurchaseSources(order: any, parts: any[]) {
   if (!(Number(order.sales_invoiced_tonnage)>0)) return true;
-  if (!Array.isArray(order.purchase_invoice_matches) || order.purchase_invoice_matches.length < 2) return false;
   const own = parts.filter(part => part.order_id === order.id && part.state !== "failed");
   if (own.some(part => part.state === "creating" || !hasSources(part))) return false;
   const tracked = own.filter(part => billedStates.includes(part.state)).reduce((sum, part) => sum + Number(part.tons), 0);

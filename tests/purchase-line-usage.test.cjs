@@ -17,11 +17,11 @@ test('an issued first 27 tons stays on the first bill after selecting the second
  parts[1].state='failed';assert.equal(exportsObject.purchaseLineUsedTons(assignments,parts,'first','second:b'),0);assert.equal(exportsObject.purchaseLineUsedTons(assignments,parts,'first','a'),27);
  assert.equal(exportsObject.canChoosePurchaseSources(order,parts),true);
 });
-test('legacy sources stay locked without complete per-invoice attribution; single-source partial mix stays fixed',()=>{
+test('legacy sources stay locked without complete per-invoice attribution; tracked single-source choices can change',()=>{
  const order={id:'sale',sales_invoiced_tonnage:27,purchase_invoice_matches:[{purchaseBillId:'first'},{purchaseBillId:'second'}]};
  assert.equal(exportsObject.canChoosePurchaseSources(order,[]),false);
  const parts=[{order_id:'sale',state:'issued',tons:27,source_lines:[{id:'first:a',tons:27}]}];
  assert.equal(exportsObject.canChoosePurchaseSources(order,parts),true);
- assert.equal(exportsObject.canChoosePurchaseSources({...order,purchase_invoice_matches:[{purchaseBillId:'first'}]},parts),false);
+ assert.equal(exportsObject.canChoosePurchaseSources({...order,purchase_invoice_matches:[{purchaseBillId:'first'}]},parts),true);
  assert.equal(exportsObject.canChoosePurchaseSources(order,[...parts,{order_id:'sale',state:'creating',tons:1}]),false);
 });

@@ -46,7 +46,7 @@ begin
  select * into previous from public.order_purchase_line_assignments where order_id=p_order_id;
  if found and coalesce(ord.sales_invoiced_tonnage,0)>0 and (previous.purchase_bill_id<>bill_id or normalized<>(select jsonb_agg(l order by l->>'id') from jsonb_array_elements(public.purchase_assignment_lines(previous)) l)) then
    select coalesce(sum(p.tons),0) into tracked_billed from public.order_sales_invoice_parts p where p.order_id=p_order_id and p.state in('created','issued','needs_review') and jsonb_array_length(coalesce(p.source_lines,'[]'))>0;
-   if jsonb_array_length(initial_matches)<2 or abs(tracked_billed-ord.sales_invoiced_tonnage)>.000001 or exists(select 1 from public.order_sales_invoice_parts p where p.order_id=p_order_id and p.state in('creating','created','needs_review')) then raise exception 'Önceki faturanın kalem kullanımı doğrulanamadı veya işlem tamamlanmadı. Kalemler değiştirilemez.'; end if;
+   if abs(tracked_billed-ord.sales_invoiced_tonnage)>.000001 or exists(select 1 from public.order_sales_invoice_parts p where p.order_id=p_order_id and p.state in('creating','created','needs_review')) then raise exception 'Önceki faturanın kalem kullanımı doğrulanamadı veya işlem tamamlanmadı. Kalemler değiştirilemez.'; end if;
  end if;
  for item in select * from jsonb_array_elements(normalized) loop
    source_bill:=case when strpos(item->>'id',':')>0 then split_part(item->>'id',':',1) else bill_id end;
