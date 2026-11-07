@@ -6,17 +6,22 @@ import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from 'lucide-
 import s from './login-form.module.css';
 
 type Props = {
+  step: 'login';
   email: string;
   password: string;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
-  onLogin: () => Promise<void>;
+} | {
+  step: 'otp';
+  code: string;
+  onCodeChange: (value: string) => void;
 };
 
-export default function LoginForm({ email, password, onEmailChange, onPasswordChange, onLogin }: Props) {
+export default function LoginForm(props: Props & { onSubmit: () => Promise<string | void> }) {
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const verifying = props.step === 'otp';
   return (
     <main className={s.page}>
       <section className={s.brand} aria-label="Niba Tarım">
@@ -28,26 +33,41 @@ export default function LoginForm({ email, password, onEmailChange, onPasswordCh
         <Link href="/" className={s.back}>← Ana sayfaya dön</Link>
         <div className={s.formWrap}>
           <Image className={s.mobileLogo} src="/niba-logo-horizontal.png" alt="Niba Tarım" width={140} height={85} />
-          <span className={s.eyebrow}>HOŞ GELDİNİZ</span>
-          <h2>Yönetim paneline giriş</h2>
-          <p className={s.description}>Devam etmek için e-posta adresinizi ve şifrenizi girin.</p>
+          <span className={s.eyebrow}>{verifying ? 'GÜVENLİ GİRİŞ' : 'HOŞ GELDİNİZ'}</span>
+          <h2>{verifying ? 'SMS doğrulaması' : 'Yönetim paneline giriş'}</h2>
+          <p className={s.description}>{verifying ? 'Girişi tamamlamak için telefonunuza gönderilen doğrulama kodunu girin.' : 'Devam etmek için e-posta adresinizi ve şifrenizi girin.'}</p>
           <form onSubmit={async event => {
             event.preventDefault();
             if (busy) return;
             setBusy(true);
             setError('');
-            try { await onLogin(); }
-            catch { setError('Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.'); }
+            try { setError(await props.onSubmit() || ''); }
+            catch { setError(verifying ? 'Kod doğrulanamadı. Lütfen tekrar deneyin.' : 'Giriş işlemi tamamlanamadı. Lütfen tekrar deneyin.'); }
             finally { setBusy(false); }
           }}>
-            <label htmlFor="admin-email">E-posta adresi</label>
-            <div className={s.inputWrap}><Mail size={19} aria-hidden="true" /><input id="admin-email" type="email" autoComplete="username" placeholder="E-posta adresiniz" value={email} onChange={event => onEmailChange(event.target.value)} required disabled={busy} /></div>
-            <label htmlFor="admin-password">Şifre</label>
-            <div className={s.inputWrap}><LockKeyhole size={19} aria-hidden="true" /><input id="admin-password" type={visible ? 'text' : 'password'} autoComplete="current-password" placeholder="Şifreniz" value={password} onChange={event => onPasswordChange(event.target.value)} required disabled={busy} /><button className={s.eye} type="button" onClick={() => setVisible(!visible)} aria-label={visible ? 'Şifreyi gizle' : 'Şifreyi göster'} aria-pressed={visible}>{visible ? <EyeOff size={19} /> : <Eye size={19} />}</button></div>
-            {error && <p className={s.error} role="alert">{error}</p>}
-            <button className={s.submit} type="submit" disabled={busy}>{busy ? 'Giriş yapılıyor…' : 'Giriş yap'}<ArrowRight size={19} aria-hidden="true" /></button>
+            {props.step === 'otp' ? (
+              <>
+                <label htmlFor="admin-otp">Doğrulama kodu</label>
+                <div className={s.inputWrap}>
+                  <LockKeyhole size={19} aria-hidden="true" />
+                  <input id="admin-otp" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]+" placeholder="SMS kodunuz" value={props.code} onChange={event => props.onCodeChange(event.target.value)} aria-invalid={!!error} aria-describedby={error ? 'admin-login-error' : undefined} required disabled={busy} />
+                </div>
+              </>
+            ) : (
+              <>
+                <label htmlFor="admin-email">E-posta adresi</label>
+                <div className={s.inputWrap}><Mail size={19} aria-hidden="true" /><input id="admin-email" type="email" autoComplete="username" placeholder="E-posta adresiniz" value={props.email} onChange={event => props.onEmailChange(event.target.value)} required disabled={busy} /></div>
+                <label htmlFor="admin-password">Şifre</label>
+                <div className={s.inputWrap}><LockKeyhole size={19} aria-hidden="true" /><input id="admin-password" type={visible ? 'text' : 'password'} autoComplete="current-password" placeholder="Şifreniz" value={props.password} onChange={event => props.onPasswordChange(event.target.value)} required disabled={busy} /><button className={s.eye} type="button" onClick={() => setVisible(!visible)} aria-label={visible ? 'Şifreyi gizle' : 'Şifreyi göster'} aria-pressed={visible}>{visible ? <EyeOff size={19} /> : <Eye size={19} />}</button></div>
+              </>
+            )}
+            {error && <p className={s.error} id="admin-login-error" role="alert">{error}</p>}
+            <button className={s.submit} type="submit" disabled={busy}>
+              {busy ? (verifying ? 'Doğrulanıyor…' : 'Giriş yapılıyor…') : (verifying ? 'Kodu doğrula' : 'Giriş yap')}
+              <ArrowRight size={19} aria-hidden="true" />
+            </button>
           </form>
-          <div className={s.security}><ShieldCheck size={19} aria-hidden="true" /><span>Girişiniz SMS doğrulamasıyla tamamlanır.</span></div>
+          <div className={s.security}><ShieldCheck size={19} aria-hidden="true" /><span>{verifying ? 'Doğrulama kodunuzu kimseyle paylaşmayın.' : 'Girişiniz SMS doğrulamasıyla tamamlanır.'}</span></div>
         </div>
         <p className={s.footer}>© {new Date().getFullYear()} Niba Tarım</p>
       </section>
