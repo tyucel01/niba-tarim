@@ -114,6 +114,7 @@ export default function Page() {
   const uploadController = useRef<AbortController | null>(null);
   const [priceImageName, setPriceImageName] = useState("");
   const [priceImageError, setPriceImageError] = useState("");
+  const [headerVariables, setHeaderVariables] = useState<string[]>([]);
   const [headerImageUrl, setHeaderImageUrl] = useState("");
   const [bodyVariables, setBodyVariables] = useState<string[]>([]);
 
@@ -245,10 +246,13 @@ export default function Page() {
   const headerComponent = selectedTemplate?.components?.find((c) => c.type?.toUpperCase() === "HEADER");
 
   const hasImageHeader = headerComponent?.format?.toUpperCase() === "IMAGE";
+  const headerText = headerComponent?.format?.toUpperCase() === "TEXT" ? headerComponent.text || "" : "";
+  const headerVariableCount = countVariables(headerText);
+  const headerComplete = headerVariables.length === headerVariableCount && headerVariables.every(value => value.trim());
   const variableCount = countVariables(bodyText);
-  const previewText = replaceVariables(bodyText, bodyVariables);
+  const previewText = [replaceVariables(headerText, headerVariables), replaceVariables(bodyText, bodyVariables)].filter(Boolean).join("\n\n");
   const hasTarget = !!groupId || !!selectedContact;
-  const readyToSend = (!hasImageHeader || !priceImageError) && hasTarget && !!selectedTemplate && (!hasImageHeader || !!headerImageUrl) && (variableCount === 0 || bodyVariables.every((v) => v.trim()));
+  const readyToSend = (!hasImageHeader || !priceImageError) && headerComplete && hasTarget && !!selectedTemplate && (!hasImageHeader || !!headerImageUrl) && (variableCount === 0 || bodyVariables.every((v) => v.trim()));
   const selectedGroupMemberCount = selectedGroup?.member_count || selectedGroup?.contacts_count || selectedGroup?.count || groupMembers[groupId]?.length || 0;
   const estimatedRecipients = selectedGroup ? selectedGroupMemberCount || "Grup" : selectedContact ? 1 : 0;
   const totalUnread = conversations.reduce((sum, item) => sum + (item.unread_count || 0), 0);
@@ -257,6 +261,10 @@ export default function Page() {
     const values = Array.from({ length: variableCount }).map((_, index) => bodyVariables[index] || "");
     setBodyVariables(values);
   }, [selectedTemplateKey, variableCount]);
+
+  useEffect(() => {
+    setHeaderVariables(Array.from({ length: headerVariableCount }, () => ""));
+  }, [selectedTemplateKey, headerVariableCount]);
 
   // Keep a prepared image while choosing templates; text templates never receive it.
 
@@ -324,6 +332,11 @@ export default function Page() {
       return;
     }
 
+    if (!headerComplete) {
+      setMsg("❌ Başlık alanlarını doldurmalısın.");
+      return;
+    }
+
     if (variableCount > 0 && bodyVariables.some((v) => !v.trim())) {
       setMsg("❌ Tüm değişkenleri doldurmalısın.");
       return;
@@ -345,6 +358,7 @@ export default function Page() {
           languageCode: selectedTemplate.language,
           headerImageUrl: hasImageHeader ? headerImageUrl || null : null,
           bodyVariables,
+          headerVariables: headerVariableCount > 0 ? headerVariables : [],
         }),
       });
 
@@ -450,7 +464,7 @@ export default function Page() {
   function clearTarget() { setSelectedConversation(null); setGroupId(''); setSelectedContact(null); setMsg(''); }
   function chooseContact(contact: any) { setSelectedContact(contact); setGroupId(''); setSelectedConversation(null); setMsg(''); }
   function chooseGroup(id: string) { setGroupId(id); setSelectedContact(null); setSelectedConversation(null); setMsg(''); }
-  const missing = !selectedTemplate ? 'Bir mesaj şablonu seç.' : uploading ? 'Görsel yükleniyor…' : hasImageHeader && !headerImageUrl ? 'Şablon için bir görsel ekle.' : bodyVariables.some(value => !value.trim()) ? 'Mesaj alanlarını doldur.' : '';
+  const missing = !selectedTemplate ? 'Bir mesaj şablonu seç.' : uploading ? 'Görsel yükleniyor…' : hasImageHeader && !headerImageUrl ? 'Şablon için bir görsel ekle.' : !headerComplete ? 'Başlık alanlarını doldur.' : bodyVariables.some(value => !value.trim()) ? 'Mesaj alanlarını doldur.' : '';
   return <main className={styles.page}>
     <div className={styles.container}>
       <Link href="/admin" prefetch={false} className={styles.back}><ArrowLeft size={16}/> Yönetim paneli</Link>
@@ -478,6 +492,7 @@ export default function Page() {
             {selectedConversation ? <><div className={styles.chat}><div className={styles.chatMessages}>{conversationMessages.map(message=><div key={message.id} className={`${styles.bubble} ${message.direction==='inbound' ? styles.inbound : styles.outbound}`}><MessageContent message={message}/><time>{formatDate(message.created_at)}</time></div>)}{messagesLoading && <p role="status">Mesajlar yükleniyor…</p>}{messagesError && <p className={styles.error} role="alert">{messagesError}</p>}{!messagesLoading && !messagesError && !conversationMessages.length && <p className={styles.listEmpty}>Bu görüşmede henüz kayıtlı mesaj yok.</p>}</div></div>{msg && <p className={styles.feedback} role="status">{msg}</p>}<form className={styles.reply} onSubmit={event=>{event.preventDefault();void sendReply();}}><label className="sr-only" htmlFor="reply-text">Yanıtın</label><textarea id="reply-text" rows={2} value={replyText} onChange={event=>setReplyText(event.target.value)} placeholder="Yanıtını yaz…"/><button type="submit" className={styles.primary} disabled={replying || !replyText.trim()}><Send size={17}/>{replying ? 'Gönderiliyor…' : 'Gönder'}</button></form></> : <div className={styles.builder}>
               <div className={styles.editor}><section className={styles.card}><div className={styles.sectionHeading}><span className={styles.stepNumber}>1</span><div><h3>Mesajını hazırla</h3><p>Onaylı bir şablon seç ve gerekli alanları doldur.</p></div></div><button type="button" className={styles.templateChoice} onClick={()=>setTemplateModalOpen(true)}><FileText size={21}/><span><small>MESAJ ŞABLONU</small><strong>{selectedTemplate?.name || 'Bir şablon seç'}</strong><small>{selectedTemplate ? `${selectedTemplate.language} · Şablonu değiştirmek için tıkla` : 'Şablonları ve mesaj örneklerini görüntüle'}</small></span><ChevronDown size={17}/></button>
                 {hasImageHeader && <div className={styles.formSection}><h4><ImagePlus size={17}/> Mesaj görseli</h4>{headerImageUrl ? <div className={styles.imageUpload}><img src={headerImageUrl} alt="Mesaja eklenen görsel"/><button type="button" className={styles.secondary} onClick={removePriceImage}>Görseli değiştir</button></div> : <label className={styles.upload}><ImagePlus size={27}/><strong>{uploading ? 'Görsel yükleniyor…' : 'Görsel ekle'}</strong><span>JPG veya PNG seç</span><input type="file" accept="image/png,image/jpeg,image/jpg" disabled={uploading} onChange={event=>{const file=event.target.files?.[0];if(file) void uploadImage(file);}}/></label>}</div>}
+                {headerVariableCount>0 && <div className={styles.formSection}><h4>Başlık alanları</h4><p>Başlıktaki değişkenin değerini yaz.</p>{Array.from({length:headerVariableCount}).map((_,index)=><label key={index} className={styles.field}><span>{index+1}. başlık alanı <small>{`{{${index+1}}}`}</small></span><input value={headerVariables[index] || ''} onChange={event=>setHeaderVariables(values=>Array.from({length:headerVariableCount},(_,i)=>i===index ? event.target.value : values[i] || ''))} placeholder="Başlıktaki değeri yaz…"/></label>)}</div>}
                 {variableCount>0 && <div className={styles.formSection}><h4>Mesaj alanları</h4><p>Yazdıkların önizlemede görünecek.</p>{Array.from({length:variableCount}).map((_,index)=><label key={index} className={styles.field}><span>{index+1}. alan <small>{`{{${index+1}}}`}</small></span><input value={bodyVariables[index] || ''} onChange={event=>{const next=[...bodyVariables];next[index]=event.target.value;setBodyVariables(next);}} placeholder="Mesajdaki değeri yaz…"/></label>)}</div>}
               </section><section className={styles.deliveryNote}><Send size={18}/><div><strong>{selectedGroup ? 'Her alıcıya ayrı mesaj' : 'Seçtiğin kişiye gönderim'}</strong><p>{selectedGroup ? 'Mesajın grup üyelerine tek tek gönderilmek üzere sıraya alınır.' : 'Mesaj yalnızca seçtiğin kişiye gönderilir.'} Göndermeden önce son kez onaylayacaksın.</p></div></section>{msg && <p className={styles.feedback} role="status">{msg}</p>}</div>
               <section className={styles.previewCard} aria-label="Mesaj önizlemesi"><div className={styles.sectionHeading}><span className={styles.stepNumber}>2</span><div><h3>Önizlemeyi kontrol et</h3><p>Alıcının göreceği mesaj.</p></div></div><div className={styles.preview}><div className={`${styles.bubble} ${styles.outbound}`}>{hasImageHeader && headerImageUrl && <img src={headerImageUrl} alt="Gönderilecek görsel"/>}<p>{previewText || 'Şablonunu seçtiğinde mesajın burada görünecek.'}</p><time>Şimdi ✓✓</time></div></div><dl className={styles.summary}><div><dt>Alıcı</dt><dd>{selectedTargetName}</dd></div><div><dt>Gönderim</dt><dd>{typeof estimatedRecipients==='number' ? `${estimatedRecipients} kişi` : 'Grup üyeleri'}</dd></div><div><dt>Şablon</dt><dd>{selectedTemplate?.name || 'Seçilmedi'}</dd></div></dl><div className={styles.sendArea}><p className={readyToSend ? styles.ready : styles.requirement}>{readyToSend ? <><Check size={15}/> Mesajın kontrol için hazır</> : missing}</p><button type="button" className={styles.primary} onClick={()=>setConfirmOpen(true)} disabled={sending || uploading || !readyToSend}><Send size={17}/>{sending ? 'Hazırlanıyor…' : 'Kontrol et ve gönder'}</button></div></section>

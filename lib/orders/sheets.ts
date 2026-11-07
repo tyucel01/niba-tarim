@@ -44,3 +44,15 @@ export function validateValues(input: unknown): SheetValues {
   if (out.gts && !["Yok", "Bekliyor", "Girildi"].includes(String(out.gts))) throw new Error("GTS durumu tanınmıyor.");
   return out;
 }
+
+/** A Sheet TODAY()-sale-date counter changes daily, without changing agreed payment terms. */
+export function isElapsedSheetDuration(values: SheetValues, savedSaleDate: unknown, snapshotAt: string) {
+  if (typeof savedSaleDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(savedSaleDate)) return false;
+  if (values.satisTarihi !== undefined && values.satisTarihi !== savedSaleDate) return false;
+  if (typeof values.vadeSuresi !== "string" || !/^\d+$/.test(values.vadeSuresi)) return false;
+  const parts = new Intl.DateTimeFormat("en", { timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(snapshotAt));
+  const part = (type: string) => parts.find(item => item.type === type)?.value;
+  const day = `${part("year")}-${part("month")}-${part("day")}`;
+  const elapsed = (Date.parse(day) - Date.parse(savedSaleDate)) / 86400000;
+  return elapsed >= 0 && Number(values.vadeSuresi) === elapsed;
+}

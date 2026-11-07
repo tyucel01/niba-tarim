@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { validSecret, validateValues } from "@/lib/orders/sheets";
+import { validSecret, validateValues, isElapsedSheetDuration } from "@/lib/orders/sheets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +31,7 @@ export async function POST(request: Request) {
     // Reject duplicate IDs in the complete batch before any mutation.
     for (const row of body.rows) { const key = String(row?.values?.satisId || "").trim(); if (key && keys.has(key)) return reply({ success: false, error: "Tekrarlanan Satış ID; hiçbir satır işlenmedi." }, 400); keys.add(key); }
     const results = [];
+    let saleDates: Map<string, string> | undefined;
     let dispatchSnapshot: Map<string, Record<string, unknown>> | undefined;
     for (const [index, row] of body.rows.entries()) {
       const rowNumber = Number.isInteger(row?.rowNumber) && row.rowNumber > 0 ? row.rowNumber : index + 2;
@@ -39,6 +40,21 @@ export async function POST(request: Request) {
         const sync = (input: Record<string, unknown>) => admin.rpc("sync_order_from_sheet", { p_source: source, p_key: values.satisId, p_values: input, p_snapshot: new Date(timestamp).toISOString(), p_dry_run: body.dryRun });
         let { data, error } = await sync(values);
         if (error) return reply({ success: false, error: "Veritabanı aktarımı tamamlanamadı. Önceki satırlar işlenmiş olabilir; aynı aktarımı güvenle tekrar deneyin.", results }, 503);
+        // Ignore only the daily elapsed-day counter on protected invoiced orders.
+        // Re-run the same transaction without it; all real commercial guards still apply.
+        if (data?.status === "review" && values.vadeSuresi !== undefined) {
+          if (!saleDates) {
+            const { data: rows, error: readError } = await admin.from("siparisler").select("satisId,satisTarihi").in("satisId", [...keys]);
+            if (readError || !rows) return reply({ success: false, error: "Vade sayacı doğrulanamadı. Aynı aktarımı yeniden deneyin.", results }, 503);
+            saleDates = new Map(rows.map(item => [String(item.satisId), String(item.satisTarihi ?? "")]));
+          }
+          if (isElapsedSheetDuration(values, saleDates.get(String(values.satisId)), new Date(timestamp).toISOString())) {
+            delete values.vadeSuresi;
+            const accepted = await sync(values);
+            if (accepted.error) return reply({ success: false, error: "Aktarım tamamlanamadı. Aynı aktarımı yeniden deneyin.", results }, 503);
+            data = accepted.data;
+          }
+        }
         // An old protected commercial difference must not block new dispatch updates.
         // The database still validates conflicts, invoice quantities and all other guards.
         if (data?.status === "review") {

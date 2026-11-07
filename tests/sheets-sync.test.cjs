@@ -62,3 +62,22 @@ test('protected commercial-only differences remain blocked; database dispatch co
  const b=route({before:{sevkDurumu:'Bekliyor'},respond:(args,call)=>({data:call===1?review:{status:'conflict',message:'Panelde ayrıca değiştirilen alan var; kontrol gerekli.'},error:null})});
  const y=await b.post(req({dryRun:false,rows:[{rowNumber:5,values:{...row.values,sevkDurumu:'Sevk Edildi'}}]}));assert.equal((await y.json()).results[0].status,'conflict');
 });
+
+test('daily elapsed counter is recognized using Istanbul date; fixed terms and sale-date changes are retained',()=>{
+ assert.equal(lib.isElapsedSheetDuration({vadeSuresi:'760',satisTarihi:'2024-10-08'},'2024-10-08','2026-11-07T09:40:00Z'),true);
+ assert.equal(lib.isElapsedSheetDuration({vadeSuresi:'761'},'2024-10-07','2026-11-07T09:40:00Z'),true);
+ assert.equal(lib.isElapsedSheetDuration({vadeSuresi:'760'},'2024-10-08','2026-11-06T21:30:00Z'),true);
+ assert.equal(lib.isElapsedSheetDuration({vadeSuresi:'60'},'2024-10-08','2026-11-07T09:40:00Z'),false);
+ assert.equal(lib.isElapsedSheetDuration({vadeSuresi:'760',satisTarihi:'2024-10-09'},'2024-10-08','2026-11-07T09:40:00Z'),false);
+});
+test('invoiced daily counter is omitted from retry; other commercial differences remain protected',async()=>{
+ const saleDate=new Date(Date.now()-760*86400000).toLocaleDateString('en-CA',{timeZone:'Europe/Istanbul'});
+ for(const dryRun of [true,false]) {
+  const r=route({before:{satisTarihi:saleDate},respond:(args,call)=>({data:call===1?{status:'review',fields:['vadeSuresi']}:{status:'unchanged'},error:null})});
+  const response=await r.post(req({dryRun,rows:[{rowNumber:52,values:{...row.values,satisTarihi:saleDate,vadeSuresi:'760'}}]}));
+  assert.equal((await response.json()).results[0].status,'unchanged');assert.equal(r.calls.length,2);assert.equal(r.calls[1].args.p_values.vadeSuresi,undefined);assert.equal(r.calls[1].args.p_dry_run,dryRun);
+ }
+ const r=route({before:{satisTarihi:saleDate},respond:(args)=>({data:{status:'review',fields:args.p_values.vadeSuresi?['vadeSuresi','pesinSatisFiyati']:['pesinSatisFiyati']},error:null})});
+ const response=await r.post(req({rows:[{rowNumber:52,values:{...row.values,satisTarihi:saleDate,vadeSuresi:'760'}}]}));
+ assert.deepEqual((await response.json()).results[0].fields,['pesinSatisFiyati']);
+});

@@ -1,3 +1,4 @@
+import { encodeTemplateVariables } from "@/lib/whatsapp/template-variables";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -15,7 +16,12 @@ export async function POST(req: Request) {
       languageCode,
       headerImageUrl,
       bodyVariables,
+      headerVariables = [],
     } = await req.json();
+
+    if (!Array.isArray(headerVariables) || headerVariables.some((value: unknown) => typeof value !== "string" || !value.trim()) || (bodyVariables !== undefined && (!Array.isArray(bodyVariables) || bodyVariables.some((value: unknown) => typeof value !== "string")))) {
+      return NextResponse.json({ success: false, error: "Geçersiz mesaj veya başlık alanları." }, { status: 400 });
+    }
 
     if (!templateName) {
       return NextResponse.json({
@@ -116,7 +122,7 @@ export async function POST(req: Request) {
           template_name: templateName,
           language_code: languageCode || "tr",
           header_image_url: headerImageUrl || null,
-          body_variables: bodyVariables || [],
+          body_variables: encodeTemplateVariables(bodyVariables || [], headerVariables),
           status: "pending",
           total_count: list.length,
           success_count: 0,

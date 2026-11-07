@@ -1,3 +1,4 @@
+import { decodeTemplateVariables } from "@/lib/whatsapp/template-variables";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -129,12 +130,14 @@ async function sendTemplate({
   languageCode,
   headerImageUrl,
   bodyVariables,
+  headerVariables,
 }: {
   to: string;
   templateName: string;
   languageCode?: string;
   headerImageUrl?: string | null;
   bodyVariables?: string[];
+  headerVariables?: string[];
 }) {
   const token = process.env.WHATSAPP_TOKEN;
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
@@ -156,6 +159,10 @@ async function sendTemplate({
         },
       ],
     });
+  }
+
+  if (!headerImageUrl && headerVariables?.length) {
+    components.push({ type: "header", parameters: headerVariables.map(text => ({ type: "text", text })) });
   }
 
   if (bodyVariables && bodyVariables.length > 0) {
@@ -328,7 +335,7 @@ export async function GET(req: Request) {
           templateName: job.campaign?.template_name,
           languageCode: job.campaign?.language_code || "tr",
           headerImageUrl: job.campaign?.header_image_url || null,
-          bodyVariables: job.campaign?.body_variables || [],
+          ...decodeTemplateVariables(job.campaign?.body_variables),
         });
 
         await supabase

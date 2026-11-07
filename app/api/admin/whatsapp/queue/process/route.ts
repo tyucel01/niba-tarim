@@ -1,3 +1,4 @@
+import { decodeTemplateVariables } from "@/lib/whatsapp/template-variables";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -62,6 +63,10 @@ async function processQueue() {
     for (const item of items || []) {
       try {
         const components: any[] = [];
+        const { bodyVariables, headerVariables } = decodeTemplateVariables(campaign.body_variables);
+        if (!campaign.header_image_url && headerVariables.length) {
+          components.push({ type: "header", parameters: headerVariables.map(text => ({ type: "text", text })) });
+        }
 
         if (campaign.header_image_url) {
           components.push({
@@ -78,12 +83,12 @@ async function processQueue() {
         }
 
         if (
-          Array.isArray(campaign.body_variables) &&
-          campaign.body_variables.length > 0
+          Array.isArray(bodyVariables) &&
+          bodyVariables.length > 0
         ) {
           components.push({
             type: "body",
-            parameters: campaign.body_variables.map((value: string) => ({
+            parameters: bodyVariables.map((value: string) => ({
               type: "text",
               text: value,
             })),
